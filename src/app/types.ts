@@ -46,6 +46,8 @@ export interface AgentConfig {
   publicDescription: string; // gives context to agent transfer tool
   instructions: string;
   tools: Tool[];
+  model?: string; // Optional model specification
+  voice?: string; // Optional voice setting for text-to-speech
   toolLogic?: Record<
     string,
     (args: any, transcriptLogsFiltered: TranscriptItem[]) => Promise<any> | any
@@ -76,6 +78,7 @@ export interface TranscriptItem {
   status: "IN_PROGRESS" | "DONE";
   isHidden: boolean;
   guardrailResult?: GuardrailResultType;
+  agentName?: string;
 }
 
 export interface Log {

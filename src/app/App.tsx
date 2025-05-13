@@ -255,15 +255,23 @@ function App() {
         };
 
     const instructions = currentAgent?.instructions || "";
+    console.log("instructions", instructions);
     const tools = currentAgent?.tools || [];
+    console.log("tools", tools);
+    const voice = currentAgent?.voice || "sage";
+    console.log("voice", voice);
 
     const sessionUpdateEvent = {
       type: "session.update",
       session: {
         modalities: ["text", "audio"],
         instructions,
-        voice: "sage",
-        input_audio_transcription: { model: "whisper-1" },
+        voice,
+        input_audio_transcription: { 
+          model: "whisper-1",
+          language: "en",
+        },
+
         turn_detection: turnDetection,
         tools,
       },

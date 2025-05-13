@@ -103,7 +103,34 @@ export function useHandleServerEvent({
         null;
       if (newAgentConfig) {
         setSelectedAgentName(destinationAgent);
+        
+        // First clear any active audio buffers
+        sendClientEvent(
+          { type: "output_audio_buffer.clear" },
+          "(clear audio before voice change)"
+        );
+        
+        // Wait a moment to ensure audio is cleared
+        setTimeout(() => {
+          // Update session with new agent's voice setting
+          const voice = newAgentConfig.voice || "sage";
+          const instructions = newAgentConfig.instructions || "";
+          const tools = newAgentConfig.tools || [];
+          
+          // Send session update to apply new voice
+          sendClientEvent({
+            type: "session.update",
+            session: {
+              modalities: ["text", "audio"],
+              instructions,
+              voice,
+              input_audio_transcription: { model: "whisper-1" },
+              tools,
+            }
+          }, "(update after agent transfer)");
+        }, 300); // Small delay to ensure buffers are cleared
       }
+      
       const functionCallOutput = {
         destination_agent: destinationAgent,
         did_transfer: !!newAgentConfig,

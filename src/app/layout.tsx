@@ -1,6 +1,6 @@
-import type { Metadata } from "next";
-import "./globals.css";
-import "./lib/envSetup";
+import { Metadata } from 'next';
+import './globals.css';
+import TestRunner from './components/TestRunner';
 
 export const metadata: Metadata = {
   title: "Realtime API Agents",
@@ -9,12 +9,15 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: {
+  children: React.ReactNode
+}) {
   return (
     <html lang="en">
-      <body className={`antialiased`}>{children}</body>
+      <body>
+        {children}
+        <TestRunner />
+      </body>
     </html>
   );
 }
