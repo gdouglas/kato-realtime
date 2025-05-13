@@ -16,6 +16,9 @@ export const ModerationCategoryZod = z.enum([...MODERATION_CATEGORIES]);
 
 export type SessionStatus = "DISCONNECTED" | "CONNECTING" | "CONNECTED";
 
+// New transition-related types for agent voice switching
+export type TransitionStatus = "IDLE" | "TRANSITIONING" | "FAILED";
+
 export interface ToolParameterProperty {
   type: string;
   description?: string;
@@ -78,6 +81,46 @@ export interface TranscriptItem {
   status: "IN_PROGRESS" | "DONE";
   isHidden: boolean;
   guardrailResult?: GuardrailResultType;
+  agentName?: string;
+}
+
+// Agent state for tracking agent-specific context
+export interface AgentState {
+  agentName: string;
+  voice?: string;
+  model?: string;
+  instructions?: string;
+  lastInteractionMs?: number;
+  contextItems?: TranscriptItem[];
+}
+
+// Transition state for managing reconnection
+export interface TransitionState {
+  status: TransitionStatus;
+  fromAgent?: string;
+  toAgent?: string;
+  startTimeMs?: number;
+  error?: string;
+  preservedContext?: SimplifiedContext[];
+}
+
+// Conversation state for persistence
+export interface ConversationState {
+  conversationId: string;
+  createdAt: number;
+  updatedAt: number;
+  transcript: TranscriptItem[];
+  agents: Record<string, AgentState>;
+  currentAgent?: string;
+  transition: TransitionState;
+  version: string; // For future compatibility
+}
+
+// Simplified context format for context assembly
+export interface SimplifiedContext {
+  role: string;
+  content: string;
+  isSystemMessage?: boolean;
   agentName?: string;
 }
 
