@@ -1,7 +1,7 @@
 """Configuration settings for the Kato API Server."""
 
 from pydantic_settings import BaseSettings
-from pydantic import Field, validator, HttpUrl
+from pydantic import Field, field_validator, HttpUrl, ConfigDict
 from typing import List, Optional
 import logging
 import os
@@ -28,22 +28,20 @@ class Settings(BaseSettings):
     # CORS settings
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "https://kato-app.example.com"]
     
-    @validator("JWT_SECRET_KEY", pre=True)
+    @field_validator("JWT_SECRET_KEY", mode='before')
     def validate_jwt_secret(cls, v):
         if not v or len(v) < 32:
             logger.warning("JWT_SECRET_KEY is missing or too short. Using an insecure default key.")
             return "insecure-dev-key-please-change-in-production-not-safe"
         return v
     
-    @validator("OPENAI_API_KEY", pre=True)
+    @field_validator("OPENAI_API_KEY", mode='before')
     def validate_openai_api_key(cls, v):
         if not v:
             logger.warning("OPENAI_API_KEY is missing or empty. OpenAI API calls will fail.")
         return v
         
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = ConfigDict(env_file=".env", case_sensitive=True, extra='ignore')
 
 # Create global settings instance
 settings = Settings()

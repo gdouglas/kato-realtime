@@ -25,6 +25,9 @@ import { createRealtimeConnection } from "./lib/realtimeConnection";
 // Agent configs
 import { allAgentSets, defaultAgentSetKey } from "@/app/agentConfigs";
 
+// Define the base URL for your FastAPI backend
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+
 import useAudioDownload from "./hooks/useAudioDownload";
 
 function App() {
@@ -137,7 +140,9 @@ function App() {
 
   const fetchEphemeralKey = async (): Promise<string | null> => {
     logClientEvent({ url: "/session" }, "fetch_session_token_request");
-    const tokenResponse = await fetch("/api/session");
+    const tokenResponse = await fetch(`${API_BASE_URL}/v1/api/session`, {
+      method: "POST",
+    });
     const data = await tokenResponse.json();
     logServerEvent(data, "fetch_session_token_response");
 

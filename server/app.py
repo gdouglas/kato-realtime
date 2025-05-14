@@ -39,7 +39,7 @@ async def read_root(settings: Settings = Depends(get_settings)):
     }
 
 # Include routers from route modules
-app.include_router(auth.router)
-app.include_router(webrtc.router)
-app.include_router(session.router)
-app.include_router(chat.router) 
+app.include_router(auth.router, prefix="/v1")
+app.include_router(webrtc.router, prefix="/v1")
+app.include_router(session.router, prefix="/v1")
+app.include_router(chat.router, prefix="/v1") 

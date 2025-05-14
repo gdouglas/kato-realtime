@@ -6,6 +6,7 @@
 export const patientKatoChart = {
   demographicInfo: {
     name: "Mr. Kato",
+    namePronunciation: "Kah-toh",
     age: 75,
     gender: "Male",
     occupation: "Retired postal worker",
