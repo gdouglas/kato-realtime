@@ -2,45 +2,159 @@
 
 A FastAPI server that provides endpoints for the Kato realtime application, including token generation and OpenAI API proxies.
 
-## Setup
+## Project Structure
 
-1. Create a virtual environment:
+The server uses a modular structure for better organization:
+
+```
+server/
+├── __init__.py         # Package initialization and convenient imports
+├── __main__.py         # Module entry point for running as a module
+├── app.py              # FastAPI application definition
+├── main.py             # Server startup and configuration
+├── config.py           # Centralized settings with Pydantic
+├── utils.py            # Utility functions (token handling, etc.)
+├── run.py              # Simple entry script for running from any directory
+├── routes/             # API routes package
+│   ├── __init__.py     # Package initialization
+│   ├── auth.py         # Authentication routes 
+│   ├── webrtc.py       # WebRTC exchange routes
+│   ├── session.py      # Session management routes
+│   └── chat.py         # Chat completion routes
+└── pyproject.toml      # Project metadata and dependencies
+```
+
+### Module Responsibilities
+
+- **app.py**: Contains the FastAPI application definition, middleware, and route inclusion
+- **main.py**: Contains server startup code and configuration
+- **__main__.py**: Entry point for running the package as a module
+- **__init__.py**: Package initialization, centralized logging setup, and exports important objects
+- **config.py**: Centralized settings management using Pydantic's BaseSettings
+- **run.py**: Simplified entry point script that can be run from any directory
+
+### Design Patterns
+
+#### Centralized Logging
+- Logging is configured once in `__init__.py`
+- Each module gets its own logger with `logger = logging.getLogger(__name__)`
+- Ensures consistent log format across the application
+
+#### Settings Management
+- Environment variables are managed with Pydantic's `BaseSettings` in `config.py`
+- Settings are validated at startup with custom validators
+- Settings are accessed through FastAPI's dependency injection system
+- Example:
+  ```python
+  @app.get("/endpoint")
+  async def endpoint(settings: Settings = Depends(get_settings)):
+      # Use settings.SOME_SETTING
+  ```
+
+## Setup with UV
+
+[UV](https://github.com/astral-sh/uv) is a fast Python package installer and resolver. This project uses UV for dependency management.
+
+1. Install UV (if not already installed):
    ```
-   python -m venv venv
+   curl -fsSL https://astral.sh/uv/install.sh | bash
    ```
 
-2. Activate the virtual environment:
+2. Create a virtual environment with UV:
+   ```
+   uv venv
+   ```
+
+3. Activate the virtual environment:
    - On Windows:
      ```
-     venv\Scripts\activate
+     .venv\Scripts\activate
      ```
    - On macOS/Linux:
      ```
-     source venv/bin/activate
+     source .venv/bin/activate
      ```
 
-3. Install dependencies:
+4. Install dependencies with UV (directly from pyproject.toml):
    ```
-   pip install -r requirements.txt
+   uv sync
    ```
 
-4. Create a `.env` file with your configuration:
+5. Create a `.env` file with your configuration (see `env.example` for reference):
    ```
    JWT_SECRET_KEY=your-secret-key-here
    OPENAI_API_KEY=your-openai-api-key-here
    ```
-   If you don't set JWT_SECRET_KEY, a random secret will be generated each time the server starts (not recommended for production).
+
+## Environment Variables
+
+The application uses the following environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| HOST | Host to bind the server | 0.0.0.0 |
+| PORT | Port to bind the server | 8000 |
+| JWT_SECRET_KEY | Secret key for JWT token signing | (Required) |
+| ALGORITHM | JWT signing algorithm | HS256 |
+| ACCESS_TOKEN_EXPIRE_MINUTES | Token expiration time | 60 |
+| OPENAI_API_KEY | OpenAI API key | (Required) |
+| OPENAI_BASE_URL | OpenAI API base URL | https://api.openai.com/v1 |
+| OPENAI_MODEL | OpenAI model to use | gpt-4o-mini-realtime-preview-2024-12-17 |
+
+## Development
+
+Install development dependencies:
+```
+uv add --dev pytest pytest-asyncio ruff
+```
+
+To add a new dependency:
+```
+uv add fastapi httpx
+```
+
+To remove a dependency:
+```
+uv remove package-name
+```
+
+To update a dependency:
+```
+uv lock --upgrade-package package-name
+```
 
 ## Running the Server
 
-Start the server with:
+There are several ways to run the server:
+
+### Method 1: Using the run.py script (recommended)
+This simple script works from any directory:
 ```
-python main.py
+# Inside server directory
+python run.py
+
+# From outside server directory
+python server/run.py
 ```
 
-Or using uvicorn directly:
+### Method 2: Using UV run with main.py
+This method ensures the environment is synced before running:
 ```
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# Inside server directory
+uv run main.py
+```
+
+### Method 3: Using module notation
+To run as a module, you need to be in the parent directory:
+```
+# From the directory containing the server directory
+uv run -m server
+```
+
+### Method 4: Using uvicorn directly
+```
+# Inside server directory
+uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ## API Endpoints
