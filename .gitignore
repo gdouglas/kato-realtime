@@ -39,3 +39,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 todo.md
+
+# python
+**__pycache__**
+server/routes/__pycache__/session.cpython-311.pyc
+server/tests/__pycache__/test_session.cpython-311-pytest-8.3.5.pyc
