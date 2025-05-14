@@ -16,7 +16,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         {children}
-        <TestRunner />
+        {/* <TestRunner /> */}
       </body>
     </html>
   );

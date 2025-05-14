@@ -1,6 +1,6 @@
-# FastAPI Token Server
+# Kato API Server
 
-A simple API server that provides endpoints for generating ephemeral JWT tokens.
+A FastAPI server that provides endpoints for the Kato realtime application, including token generation and OpenAI API proxies.
 
 ## Setup
 
@@ -27,8 +27,9 @@ A simple API server that provides endpoints for generating ephemeral JWT tokens.
 4. Create a `.env` file with your configuration:
    ```
    JWT_SECRET_KEY=your-secret-key-here
+   OPENAI_API_KEY=your-openai-api-key-here
    ```
-   If you don't set this, a random secret will be generated each time the server starts (not recommended for production).
+   If you don't set JWT_SECRET_KEY, a random secret will be generated each time the server starts (not recommended for production).
 
 ## Running the Server
 
@@ -44,8 +45,15 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ## API Endpoints
 
+### Authentication
 - `GET /`: Health check
 - `POST /api/token`: Generate a new ephemeral token
+- `GET /api/protected`: Protected route example (requires token)
+
+### OpenAI API Proxies
+- `POST /api/webrtc-exchange`: WebRTC connection negotiation proxy to OpenAI
+- `GET /api/session`: Create a new realtime session with OpenAI
+- `POST /api/chat/completions`: Proxy for OpenAI chat completions API
 
 ## API Documentation
 
