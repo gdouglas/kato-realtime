@@ -499,7 +499,7 @@ function App() {
               <label className="flex items-center text-base gap-1 mr-2 font-medium">
                 Agent
               </label>
-              <div className="relative inline-block">
+              <div className="relative inline-block agent-selector">
                 <select
                   value={selectedAgentName}
                   onChange={handleSelectedAgentChange}

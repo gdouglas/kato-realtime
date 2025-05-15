@@ -29,7 +29,7 @@ async def create_session(settings: Settings = Depends(get_settings)):
         request_body = {
             "model": settings.OPENAI_MODEL,
             "modalities": ["audio", "text"],
-            "instructions": "You are a helpful assistant."
+            "instructions": ""
         }
         
         # Make the request to OpenAI
