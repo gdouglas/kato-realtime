@@ -52,6 +52,8 @@ function App() {
   const [sessionStatus, setSessionStatus] =
     useState<SessionStatus>("DISCONNECTED");
 
+  const [manualDisconnect, setManualDisconnect] = useState<boolean>(false);
+
   const [isEventsPaneExpanded, setIsEventsPaneExpanded] =
     useState<boolean>(true);
   const [userText, setUserText] = useState<string>("");
@@ -110,10 +112,10 @@ function App() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (selectedAgentName && sessionStatus === "DISCONNECTED") {
+    if (selectedAgentName && sessionStatus === "DISCONNECTED" && !manualDisconnect) {
       connectToRealtime();
     }
-  }, [selectedAgentName]);
+  }, [selectedAgentName, sessionStatus, manualDisconnect]);
 
   useEffect(() => {
     if (
@@ -157,7 +159,16 @@ function App() {
   };
 
   const connectToRealtime = async () => {
-    if (sessionStatus !== "DISCONNECTED") return;
+    // If already connecting or connected, do not proceed.
+    if (sessionStatus === "CONNECTING" || sessionStatus === "CONNECTED") {
+      console.warn(
+        `connectToRealtime called while status is ${sessionStatus}. Aborting.`
+      );
+      return;
+    }
+
+    // For any other status (e.g., DISCONNECTED, CONNECTING_ERROR), proceed to connect.
+    setManualDisconnect(false); // Reset manualDisconnect when attempting to connect
     setSessionStatus("CONNECTING");
 
     try {
@@ -361,8 +372,9 @@ function App() {
   const onToggleConnection = () => {
     if (sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING") {
       disconnectFromRealtime();
-      setSessionStatus("DISCONNECTED");
+      setManualDisconnect(true);
     } else {
+      setManualDisconnect(false);
       connectToRealtime();
     }
   };
@@ -378,10 +390,19 @@ function App() {
     e: React.ChangeEvent<HTMLSelectElement>
   ) => {
     const newAgentName = e.target.value;
+    if (newAgentName === selectedAgentName) {
+      return;
+    }
+
+    setManualDisconnect(false);
+
+    if (sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING") {
+      disconnectFromRealtime();
+    }
+    
     setSelectedAgentName(newAgentName);
   };
 
-  // Instead of using setCodec, we update the URL and refresh the page when codec changes
   const handleCodecChange = (newCodec: string) => {
     const url = new URL(window.location.toString());
     url.searchParams.set("codec", newCodec);

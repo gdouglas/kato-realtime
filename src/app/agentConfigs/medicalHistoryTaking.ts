@@ -92,7 +92,7 @@ const medicalPreceptor: AgentConfig = {
   publicDescription: "Medical instructor guiding students through ophthalmology history-taking and differential diagnosis.",
   instructions: `You are a virtual preceptor for students at the University of British Columbia Faculty of Medicine. Respond with short concise statements. Answer questions as a medical preceptor training students to take a patient history. "Welcome the student by saying welcome, you can ask me questions or meet your patient." do not offer to help or assist them.`,
   tools: [getPatientChartTool],
-  downstreamAgents: [patientKato],
+  downstreamAgents: [],
   toolLogic: {
     getPatientChart: (args: { section: string }) => {
       const section = args.section;
