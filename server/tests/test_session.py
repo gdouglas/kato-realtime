@@ -17,8 +17,8 @@ def test_create_session_success(client):
     
     # Patch the httpx.AsyncClient.post call that our FastAPI route makes
     with patch("httpx.AsyncClient.post", return_value=mock_response):
-        # Call our FastAPI endpoint (/v1/api/session)
-        response = client.post("/v1/api/session")
+        # Call our FastAPI endpoint (/api/v1/session)
+        response = client.post("/api/v1/session")
         
         # Assertions for the response that OUR FastAPI endpoint returns
         assert response.status_code == 200
@@ -44,7 +44,7 @@ def test_create_session_api_error(client):
     
     # Patch the httpx AsyncClient post method
     with patch("httpx.AsyncClient.post", return_value=mock_response):
-        response = client.post("/v1/api/session")
+        response = client.post("/api/v1/session")
         
         # Assertions
         assert response.status_code == 401

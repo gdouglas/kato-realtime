@@ -334,8 +334,11 @@ export class WebRTCManager {
     ephemeralKey: string,
     sdp: string
   ): Promise<{ sdp: string }> {
-    // Use our own API proxy endpoint to avoid CORS issues
-    const response = await fetch("/api/webrtc-exchange", {
+    // Define the API base URL from environment variable or default to localhost:8000
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    
+    // Use FastAPI server endpoint instead of Next.js API route
+    const response = await fetch(`${API_BASE_URL}/v1/webrtc-exchange`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -347,7 +350,8 @@ export class WebRTCManager {
     });
 
     if (!response.ok) {
-      throw new Error(`Server error: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`Server error: ${response.status} - ${errorText}`);
     }
 
     return response.json();

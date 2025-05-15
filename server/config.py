@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini-realtime-preview-2024-12-17"
     
     # CORS settings
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "https://kato-app.example.com"]
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000", "https://kato-app.example.com"]
     
     @field_validator("JWT_SECRET_KEY", mode='before')
     def validate_jwt_secret(cls, v):

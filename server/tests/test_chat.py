@@ -42,7 +42,7 @@ def test_chat_completions_success(client):
     
     # Patch the httpx AsyncClient post method
     with patch("httpx.AsyncClient.post", return_value=mock_response):
-        response = client.post("/v1/api/chat/completions", json=request_data)
+        response = client.post("/v1/chat/completions", json=request_data)
         
         # Assertions
         assert response.status_code == 200
@@ -70,7 +70,7 @@ def test_chat_completions_api_error(client):
     
     # Patch the httpx AsyncClient post method
     with patch("httpx.AsyncClient.post", return_value=mock_response):
-        response = client.post("/v1/api/chat/completions", json=request_data)
+        response = client.post("/v1/chat/completions", json=request_data)
         
         # Assertions
         assert response.status_code == 400

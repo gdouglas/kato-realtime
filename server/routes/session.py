@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Create router
 router = APIRouter(tags=["Sessions"])
 
-@router.post("/api/session")
+@router.post("/session")
 async def create_session(settings: Settings = Depends(get_settings)):
     """Create a new realtime session with OpenAI."""
     try:

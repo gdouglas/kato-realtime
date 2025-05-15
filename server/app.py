@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import get_settings, Settings
 
 # Import route modules
-from routes import auth, webrtc, session, chat
+from routes import auth, session, chat, responses
 
 # Get module logger
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ async def read_root(settings: Settings = Depends(get_settings)):
     }
 
 # Include routers from route modules
-app.include_router(auth.router, prefix="/v1")
-app.include_router(webrtc.router, prefix="/v1")
-app.include_router(session.router, prefix="/v1")
-app.include_router(chat.router, prefix="/v1") 
+app.include_router(auth.router, prefix="/api/v1")
+app.include_router(session.router, prefix="/api/v1")
+app.include_router(chat.router, prefix="/api/v1")
+app.include_router(responses.router, prefix="/api/v1") 

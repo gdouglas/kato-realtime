@@ -42,6 +42,13 @@ const TestIndexPage: FC = () => {
           These tests validate the WebRTC reconnection approach for switching voices between
           Preceptor (Shimmer) and Patient (Ash) in the medical education simulation.
         </p>
+        <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+          <p className="text-sm text-blue-800">
+            <strong>Note:</strong> These tests require the FastAPI server to be running at{" "}
+            <code className="bg-blue-100 px-1 py-0.5 rounded">{process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"}</code>.
+            Make sure it's started before running tests. The FastAPI server should be configured with the <code className="bg-blue-100 px-1 py-0.5 rounded">/v1</code> prefix.
+          </p>
+        </div>
       </div>
 
       <div className="grid gap-6">

@@ -22,32 +22,40 @@ export async function runGuardrailClassifier(message: string): Promise<Guardrail
     },
   ];
 
-  const response = await fetch("/api/chat/completions", {
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
+
+  const response = await fetch(`${API_BASE_URL}/v1/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model: "o4-mini-2025-04-16",
       messages,
       response_format: zodResponseFormat(GuardrailOutputZod, "output_format"),
     }),
   });
 
   if (!response.ok) {
-    console.warn("Server returned an error:", response);
-    return Promise.reject("Error with runGuardrailClassifier.");
+    const errorBody = await response.text();
+    console.warn("Server returned an error:", response.status, response.statusText, errorBody);
+    return Promise.reject(`Error with runGuardrailClassifier: ${response.status} ${response.statusText} - ${errorBody}`);
   }
 
   const data = await response.json();
 
   try {
-    // Parse the message content as JSON and validate it using the GuardrailOutput schema.
-    const parsedContent = JSON.parse(data.choices[0].message.content);
+    // When using response_format with fetch, the AI's JSON string output is in message.content
+    const aiJsonString = data.choices[0].message.content;
+    if (typeof aiJsonString !== 'string') {
+      console.error("AI response content is not a string:", aiJsonString, "Full data:", data);
+      throw new Error("AI response content is not a string as expected for JSON output.");
+    }
+    const parsedContent = JSON.parse(aiJsonString);
     const output = GuardrailOutputZod.parse(parsedContent);
     return output;
   } catch (error) {
-    console.error("Error parsing the message content as GuardrailOutput:", error);
-    return Promise.reject("Failed to parse guardrail output.");
+    console.error("Error parsing or validating the AI's structured output:", error, "Raw data:", data);
+    return Promise.reject("Failed to parse or validate guardrail output.");
   }
 }

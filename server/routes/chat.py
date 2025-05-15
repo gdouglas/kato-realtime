@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Create router
 router = APIRouter(tags=["Chat"])
 
-@router.post("/api/chat/completions")
+@router.post("/chat/completions")
 async def chat_completions(
     request: Request,
     settings: Settings = Depends(get_settings)
@@ -23,7 +23,7 @@ async def chat_completions(
     try:
         body = await request.json()
         
-        completions_url = urljoin(settings.OPENAI_BASE_URL, "chat/completions")
+        completions_url = urljoin(settings.OPENAI_BASE_URL, "/v1/chat/completions")
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 completions_url,
@@ -35,6 +35,7 @@ async def chat_completions(
                 timeout=60.0
             )
             
+            logger.error(f"Calling: {completions_url}")
             if not response.is_success:
                 logger.error(f"OpenAI API error: {response.status_code} {response.reason_phrase}")
                 raise HTTPException(

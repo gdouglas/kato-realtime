@@ -54,11 +54,26 @@ const agentConfigs = {
  * Fetches an ephemeral API key from the server
  */
 async function fetchEphemeralKey(): Promise<string> {
-  const response = await fetch("/api/session");
+  // Define the API base URL from environment variable or default to localhost:8000
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+  
+  // Call the FastAPI server endpoint
+  const response = await fetch(`${API_BASE_URL}/v1/session`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    }
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to fetch ephemeral key: ${response.status} ${errorText}`);
+  }
+  
   const data = await response.json();
   
   if (!data?.client_secret?.value) {
-    throw new Error("Failed to fetch ephemeral key");
+    throw new Error("Failed to fetch ephemeral key - no client_secret.value in response");
   }
   
   return data.client_secret.value;

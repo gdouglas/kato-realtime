@@ -161,13 +161,13 @@ uvicorn app:app --reload --host 0.0.0.0 --port 8000
 
 ### Authentication
 - `GET /`: Health check
-- `POST /api/token`: Generate a new ephemeral token
-- `GET /api/protected`: Protected route example (requires token)
+- `POST /v1/token`: Generate a new ephemeral token
+- `GET /v1/protected`: Protected route example (requires token)
 
 ### OpenAI API Proxies
-- `POST /api/webrtc-exchange`: WebRTC connection negotiation proxy to OpenAI
-- `GET /api/session`: Create a new realtime session with OpenAI
-- `POST /api/chat/completions`: Proxy for OpenAI chat completions API
+- `POST /v1/webrtc-exchange`: WebRTC connection negotiation proxy to OpenAI
+- `POST /v1/session`: Create a new realtime session with OpenAI
+- `POST /v1/chat/completions`: Proxy for OpenAI chat completions API
 
 ## API Documentation
 

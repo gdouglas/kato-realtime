@@ -52,7 +52,7 @@ const VoiceSwitchingTest = () => {
       setIsLoadingKey(true);
       addLog('Fetching ephemeral key from server API...');
       
-      const response = await fetch('/api/session');
+      const response = await fetch('/api/v1/session');
       const data = await response.json();
       
       if (!data.client_secret?.value) {

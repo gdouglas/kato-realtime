@@ -140,7 +140,7 @@ function App() {
 
   const fetchEphemeralKey = async (): Promise<string | null> => {
     logClientEvent({ url: "/session" }, "fetch_session_token_request");
-    const tokenResponse = await fetch(`${API_BASE_URL}/v1/api/session`, {
+    const tokenResponse = await fetch(`${API_BASE_URL}/api/v1/session`, {
       method: "POST",
     });
     const data = await tokenResponse.json();
