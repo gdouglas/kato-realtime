@@ -281,6 +281,7 @@ export function useHandleServerEvent({
         if (itemId) {
           updateTranscriptItem(itemId, { status: "DONE" });
         }
+
         break;
       }
 

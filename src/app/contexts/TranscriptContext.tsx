@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, FC, PropsWithChildren } from "react";
+import React, { createContext, useContext, useState, FC, PropsWithChildren, useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { TranscriptItem } from "@/app/types";
 
@@ -27,7 +27,7 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
     });
   }
 
-  const addTranscriptMessage: TranscriptContextValue["addTranscriptMessage"] = (itemId, role, text = "", isHidden = false) => {
+  const addTranscriptMessage: TranscriptContextValue["addTranscriptMessage"] = useCallback((itemId, role, text = "", isHidden = false) => {
     setTranscriptItems((prev) => {
       if (prev.some((log) => log.itemId === itemId && log.type === "MESSAGE")) {
         console.warn(`[addTranscriptMessage] skipping; message already exists for itemId=${itemId}, role=${role}, text=${text}`);
@@ -48,9 +48,9 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
 
       return [...prev, newItem];
     });
-  };
+  }, [setTranscriptItems]);
 
-  const updateTranscriptMessage: TranscriptContextValue["updateTranscriptMessage"] = (itemId, newText, append = false) => {
+  const updateTranscriptMessage: TranscriptContextValue["updateTranscriptMessage"] = useCallback((itemId, newText, append = false) => {
     setTranscriptItems((prev) =>
       prev.map((item) => {
         if (item.itemId === itemId && item.type === "MESSAGE") {
@@ -62,9 +62,9 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
         return item;
       })
     );
-  };
+  }, [setTranscriptItems]);
 
-  const addTranscriptBreadcrumb: TranscriptContextValue["addTranscriptBreadcrumb"] = (title, data) => {
+  const addTranscriptBreadcrumb: TranscriptContextValue["addTranscriptBreadcrumb"] = useCallback((title, data) => {
     setTranscriptItems((prev) => [
       ...prev,
       {
@@ -79,34 +79,43 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
         isHidden: false,
       },
     ]);
-  };
+  }, [setTranscriptItems]);
 
-  const toggleTranscriptItemExpand: TranscriptContextValue["toggleTranscriptItemExpand"] = (itemId) => {
+  const toggleTranscriptItemExpand: TranscriptContextValue["toggleTranscriptItemExpand"] = useCallback((itemId) => {
     setTranscriptItems((prev) =>
       prev.map((log) =>
         log.itemId === itemId ? { ...log, expanded: !log.expanded } : log
       )
     );
-  };
+  }, [setTranscriptItems]);
 
-  const updateTranscriptItem: TranscriptContextValue["updateTranscriptItem"] = (itemId, updatedProperties) => {
+  const updateTranscriptItem: TranscriptContextValue["updateTranscriptItem"] = useCallback((itemId, updatedProperties) => {
     setTranscriptItems((prev) =>
       prev.map((item) =>
         item.itemId === itemId ? { ...item, ...updatedProperties } : item
       )
     );
-  };
+  }, [setTranscriptItems]);
+
+  const contextValue = React.useMemo(() => ({
+    transcriptItems,
+    addTranscriptMessage,
+    updateTranscriptMessage,
+    addTranscriptBreadcrumb,
+    toggleTranscriptItemExpand,
+    updateTranscriptItem,
+  }), [
+    transcriptItems,
+    addTranscriptMessage,
+    updateTranscriptMessage,
+    addTranscriptBreadcrumb,
+    toggleTranscriptItemExpand,
+    updateTranscriptItem,
+  ]);
 
   return (
     <TranscriptContext.Provider
-      value={{
-        transcriptItems,
-        addTranscriptMessage,
-        updateTranscriptMessage,
-        addTranscriptBreadcrumb,
-        toggleTranscriptItemExpand,
-        updateTranscriptItem,
-      }}
+      value={contextValue}
     >
       {children}
     </TranscriptContext.Provider>

@@ -106,14 +106,15 @@ function KatoPageContent() {
     if (!data.client_secret?.value) {
       logClientEvent(data, "error.no_ephemeral_key");
       console.error("No ephemeral key provided by the server");
-      setSessionStatus("DISCONNECTED");
+      setSessionStatus("ERROR");
+      addTranscriptBreadcrumb("Failed to fetch session token. Connection aborted.");
       return null;
     }
     return data.client_secret.value;
-  }, [logClientEvent, logServerEvent]);
+  }, [logClientEvent, logServerEvent, setSessionStatus, addTranscriptBreadcrumb]);
 
   const connectToRealtime = useCallback(async () => {
-    if (sessionStatus === "CONNECTING" || sessionStatus === "CONNECTED") {
+    if (sessionStatus === "CONNECTING" || sessionStatus === "CONNECTED" || sessionStatus === "ERROR") {
       console.warn(
         `connectToRealtime called while status is ${sessionStatus}. Aborting.`
       );
@@ -160,10 +161,10 @@ function KatoPageContent() {
       setDataChannel(dc);
     } catch (err) {
       console.error("Error connecting to realtime:", err);
-      setSessionStatus("DISCONNECTED");
+      setSessionStatus("ERROR");
       addTranscriptBreadcrumb(`Error connecting: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [sessionStatus, fetchEphemeralKey, isAudioPlaybackEnabled, urlCodec, logClientEvent, handleServerEventRef, addTranscriptBreadcrumb]);
+  }, [sessionStatus, fetchEphemeralKey, isAudioPlaybackEnabled, urlCodec, logClientEvent, handleServerEventRef, addTranscriptBreadcrumb, setSessionStatus]);
 
   const disconnectFromRealtime = useCallback(() => {
     if (pcRef.current) {
@@ -259,7 +260,11 @@ function KatoPageContent() {
     if (selectedAgentName && sessionStatus === "DISCONNECTED" && !manualDisconnect) {
       connectToRealtime();
     }
-  }, [selectedAgentName, sessionStatus, manualDisconnect, connectToRealtime]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // TODO: connectToRealtime was removed from deps to prevent infinite loop.
+    // Proper fix involves stabilizing connectToRealtime (and its dependency handleServerEventRef)
+    // so it can be safely included in the dependency array.
+  }, [selectedAgentName, sessionStatus, manualDisconnect]); // connectToRealtime REMOVED
 
   // Update session when connected
   useEffect(() => {
