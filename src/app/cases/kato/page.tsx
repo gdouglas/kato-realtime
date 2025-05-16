@@ -77,6 +77,9 @@ function KatoPageContent() {
   const [audioUrlForModalRetry, setAudioUrlForModalRetry] = useState<string | null>(null);
   const [audioBlobForModalRetry, setAudioBlobForModalRetry] = useState<Blob | null>(null);
 
+  // Ref to track if initial setup for the current agent has been done
+  const hasDoneInitialAgentSetupRef = useRef<boolean>(false);
+
   const sendClientEvent = useCallback((eventObj: any, eventNameSuffix = "") => {
     if (dcRef.current && dcRef.current.readyState === "open") {
       logClientEvent(eventObj, eventNameSuffix);
@@ -399,20 +402,34 @@ function KatoPageContent() {
     // playIntroductoryMessageThenConnect is now a dependency.
   }, [selectedAgentName, sessionStatus, manualDisconnect, playIntroductoryMessageThenConnect]); // connectToRealtime REMOVED, playIntroductoryMessageThenConnect ADDED
 
-  // Update session when connected
+  // Update session when connected (typically for new agent or fresh connection)
   useEffect(() => {
     if (
       sessionStatus === "CONNECTED" &&
       selectedAgentConfigSet &&
-      selectedAgentName
+      selectedAgentName &&
+      !hasDoneInitialAgentSetupRef.current // Only run if initial setup for this agent hasn't been done
     ) {
       const currentAgent = selectedAgentConfigSet.find(
         (a) => a.name === selectedAgentName
       );
       addTranscriptBreadcrumb(`Switched to Agent: ${currentAgent?.publicDescription || selectedAgentName}`, currentAgent);
       updateSession(true); // Send initial message
+      hasDoneInitialAgentSetupRef.current = true; // Mark setup as done for this agent session
     }
   }, [selectedAgentConfigSet, selectedAgentName, sessionStatus, updateSession, addTranscriptBreadcrumb]);
+
+  // Reset initial setup flag if the selected agent changes
+  useEffect(() => {
+    hasDoneInitialAgentSetupRef.current = false;
+  }, [selectedAgentName]);
+
+  // Reset initial setup flag if the session is truly disconnected or errors out
+  useEffect(() => {
+    if (sessionStatus === "DISCONNECTED" || sessionStatus === "ERROR") {
+      hasDoneInitialAgentSetupRef.current = false;
+    }
+  }, [sessionStatus]);
 
   // Manage isPTTActive based on uiMode
   useEffect(() => {
