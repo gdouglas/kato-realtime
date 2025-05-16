@@ -57,7 +57,8 @@ function KatoPageContent() {
   const [userText, setUserText] = useState<string>("");
   
   const [uiMode, setUiMode] = useState<"avatar" | "text">("avatar");
-  const [isPTTActive, setIsPTTActive] = useState<boolean>(true); // PTT enabled by default for avatar mode
+  const [isPTTActive, setIsPTTActive] = useState<boolean>(false); // PTT disabled by default, server VAD is default
+  const [currentAudioInputMode, setCurrentAudioInputMode] = useState<"conversation" | "ptt" | "no_mic">("conversation");
 
   const [isPTTUserSpeaking, setIsPTTUserSpeaking] = useState<boolean>(false);
   const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] =
@@ -79,6 +80,14 @@ function KatoPageContent() {
 
   // Ref to track if initial setup for the current agent has been done
   const hasDoneInitialAgentSetupRef = useRef<boolean>(false);
+
+  // State to track the active speaker for UI indication
+  const [activeSpeakerTurn, setActiveSpeakerTurn] = useState<
+    "user" | "patient" | "preceptor" | "none"
+  >("none");
+
+  // Ref to store the previous state of isOutputAudioBufferActive
+  const prevIsOutputAudioBufferActiveRef = useRef<boolean>(false);
 
   const sendClientEvent = useCallback((eventObj: any, eventNameSuffix = "") => {
     if (dcRef.current && dcRef.current.readyState === "open") {
@@ -223,29 +232,43 @@ function KatoPageContent() {
     const currentAgent = selectedAgentConfigSet?.find(
       (a) => a.name === selectedAgentName
     );
-    const turnDetection = isPTTActive
-      ? null
-      : {
-          type: "server_vad",
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 200,
-          create_response: true,
-        };
+
+    let turnDetectionConfig: any = null;
+    let modalitiesConfig = ["text", "audio"];
+    let transcriptionConfig: any = {
+      model: "whisper-1",
+      language: "en",
+    };
+
+    if (currentAudioInputMode === "no_mic") {
+      modalitiesConfig = ["text"];
+      transcriptionConfig = null; // No transcription if no mic
+      // turnDetectionConfig remains null (PTT effectively, or server ignores with no audio modality)
+    } else if (currentAudioInputMode === "conversation") {
+      // This implies isPTTActive should be false for VAD
+      turnDetectionConfig = {
+        type: "server_vad",
+        threshold: 0.5,
+        prefix_padding_ms: 300,
+        silence_duration_ms: 200,
+        create_response: true,
+      };
+    } else { // "ptt" mode
+      // This implies isPTTActive should be true
+      turnDetectionConfig = null;
+    }
+
     const instructions = currentAgent?.instructions || "";
     const tools = currentAgent?.tools || [];
     const voice = currentAgent?.voice || "sage";
     const sessionUpdateEvent = {
       type: "session.update",
       session: {
-        modalities: ["text", "audio"],
+        modalities: modalitiesConfig,
         instructions,
         voice,
-        input_audio_transcription: { 
-          model: "whisper-1",
-          language: "en",
-        },
-        turn_detection: turnDetection,
+        input_audio_transcription: transcriptionConfig,
+        turn_detection: turnDetectionConfig,
         tools,
       },
     };
@@ -253,7 +276,7 @@ function KatoPageContent() {
     if (shouldTriggerResponse) {
       sendSimulatedUserMessage("hi");
     }
-  }, [sendClientEvent, selectedAgentConfigSet, selectedAgentName, isPTTActive, sendSimulatedUserMessage]);
+  }, [sendClientEvent, selectedAgentConfigSet, selectedAgentName, sendSimulatedUserMessage, currentAudioInputMode]);
 
   const playIntroductoryMessageThenConnect = useCallback(async (isRetryAfterModal = false) => {
     if (!isRetryAfterModal && (sessionStatus === "CONNECTING" || sessionStatus === "CONNECTED" || !selectedAgentName)) {
@@ -432,22 +455,24 @@ function KatoPageContent() {
   }, [sessionStatus]);
 
   // Manage isPTTActive based on uiMode
+  /* // REMOVED: isPTTActive is now user-controlled for avatar mode, not automatic based on uiMode.
   useEffect(() => {
     const newIsPTTActive = uiMode === 'avatar';
     if (newIsPTTActive !== isPTTActive) {
       setIsPTTActive(newIsPTTActive);
     }
   }, [uiMode, isPTTActive, setIsPTTActive]);
+  */
 
-  // Update session on PTT active change (this will also run when uiMode changes isPTTActive)
+  // Update session on PTT active change or audio input mode change
   useEffect(() => {
     if (sessionStatus === "CONNECTED") {
       console.log(
-        `updatingSession, isPTTActive=${isPTTActive} sessionStatus=${sessionStatus}`
+        `updatingSession due to state change: isPTTActive=${isPTTActive}, currentAudioInputMode=${currentAudioInputMode}, sessionStatus=${sessionStatus}`
       );
       updateSession();
     }
-  }, [isPTTActive, sessionStatus, updateSession]);
+  }, [isPTTActive, currentAudioInputMode, sessionStatus, updateSession]);
 
   const cancelAssistantSpeech = useCallback(async () => {
     const mostRecentAssistantMessage = [...transcriptItems]
@@ -524,7 +549,7 @@ function KatoPageContent() {
         console.warn("Connect attempt without selected agent.");
       }
     }
-  }, [sessionStatus, disconnectFromRealtime, connectToRealtime, selectedAgentName, addTranscriptBreadcrumb]);
+  }, [sessionStatus, disconnectFromRealtime, connectToRealtime, selectedAgentName, addTranscriptBreadcrumb, playIntroductoryMessageThenConnect]);
 
   const handleAvatarAgentSelect = useCallback((newAgentName: string) => {
     if (newAgentName === selectedAgentName && sessionStatus === "CONNECTED") {
@@ -591,6 +616,35 @@ function KatoPageContent() {
 
   const isDisconnectedOrErrorState = (sessionStatus as SessionStatus) === "DISCONNECTED" || (sessionStatus as SessionStatus) === "ERROR";
 
+  // Determine active speaker for UI indicator
+  useEffect(() => {
+    const patientAgentName = selectedAgentConfigSet?.find(a => a.name === "mrKato")?.name;
+    const preceptorAgentName = selectedAgentConfigSet?.find(a => a.name === "preceptor")?.name;
+
+    let newTurn: 'user' | 'patient' | 'preceptor' | 'none' = 'none';
+
+    if (isOutputAudioBufferActive) { // Agent is actively speaking
+      if (selectedAgentName === patientAgentName) {
+        newTurn = "patient";
+      } else if (selectedAgentName === preceptorAgentName) {
+        newTurn = "preceptor";
+      } else {
+        // Potentially other agent types, or default to 'none' if agent isn't patient/preceptor
+        newTurn = "none"; 
+      }
+    } else { // Agent is NOT speaking, so it's implicitly user's turn or waiting for user
+      newTurn = "user";
+      // Note: isPTTUserSpeaking (for radiating rings) is handled separately and only applies if isPTTActive is true.
+      // The turn is 'user' here regardless of whether PTT button is currently down or VAD is active.
+    }
+    
+    setActiveSpeakerTurn(newTurn);
+
+    // Update ref for next render (used for detecting when agent *stops* speaking, though the logic above might make this less critical)
+    prevIsOutputAudioBufferActiveRef.current = isOutputAudioBufferActive;
+
+  }, [isPTTActive, isPTTUserSpeaking, isOutputAudioBufferActive, selectedAgentName, selectedAgentConfigSet]);
+
   return (
     <div className="text-base flex flex-col h-screen bg-gray-100 text-gray-800 relative">
       {/* Header: Title, current agent name/status */}
@@ -631,72 +685,83 @@ function KatoPageContent() {
         {showAudioInteractionModal && (
           <div className="absolute inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50 p-4">
             <div className="bg-white p-8 rounded-lg shadow-xl text-center max-w-md">
-              <h3 className="text-xl font-semibold mb-4 text-gray-800">Audio Playback</h3>
+              <h3 className="text-xl font-semibold mb-4 text-gray-800">Audio Interaction</h3>
               <p className="mb-6 text-gray-600">
                 This application works best as an audio-based conversation. Please ensure your
                 microphone and speakers (or headphones) are enabled.
-              </p>
-              <p className="mb-6 text-sm text-gray-500">
-                Click "OK" to enable audio for the introductory message.
               </p>
               <button
                 onClick={handleModalOkAndRetryAudio}
                 className="px-8 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 transition-colors"
               >
-                OK
+                Let's Get Started!
               </button>
             </div>
           </div>
         )}
 
         {uiMode === 'avatar' && (
-          <div className="flex flex-col items-center justify-center gap-8 w-full max-w-2xl">
-            {/* Avatars Row */}
-            <div className="flex justify-around w-full">
+          <div className="flex flex-col items-center justify-center gap-8 w-full max-w-3xl relative h-full">
+            
+            {/* Central Active Conversation Area */}
+            <div className="flex justify-around w-full items-start mt-8">
               {/* User Avatar */}
-              <div className="flex flex-col items-center text-center">
-                <div className={`w-28 h-28 border-4 border-blue-500 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 text-2xl font-semibold shadow-md`}>
-                  You
+              <div className="flex flex-col items-center text-center w-1/3">
+                <div className={`relative w-32 h-32 border-4 border-blue-500 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 text-3xl font-semibold shadow-lg`}>
+                  <span style={{ position: 'relative', zIndex: 1 }}>You</span>
+                  {isPTTUserSpeaking && (
+                    <>
+                      <div className="radiating-ring"></div>
+                      <div className="radiating-ring"></div>
+                      <div className="radiating-ring"></div>
+                    </>
+                  )}
                 </div>
-                <span className="mt-2 text-sm font-medium text-gray-700">Your Microphone</span>
+                <span className="mt-2 text-md font-medium text-gray-700">Your Microphone</span>
+                <div className={`
+                  indicator-line
+                  ${activeSpeakerTurn === 'user' ? 'turn-active user-turn' : ''}
+                `}></div>
               </div>
 
-              {/* Patient Avatar */}
-              {patientAgent && (
-                <div
-                  className={`flex flex-col items-center text-center cursor-pointer p-3 rounded-xl transition-all duration-150 ease-in-out
-                              ${selectedAgentName === patientAgent.name ? 'bg-green-200 shadow-lg scale-105' : 'hover:bg-green-50'}`}
-                  onClick={() => handleAvatarAgentSelect(patientAgent.name)}
-                  title={`Switch to ${patientAgent.publicDescription}`}
-                >
-                  <div className={`w-28 h-28 border-4 border-green-500 bg-green-100 rounded-full flex items-center justify-center text-green-700 text-2xl font-semibold shadow-md`}>
+              {/* Active Agent Avatar (Patient OR Preceptor) */}
+              {selectedAgentName === patientAgent?.name && patientAgent && (
+                <div className="flex flex-col items-center text-center w-1/3">
+                  <div 
+                    className={`w-32 h-32 border-4 border-green-500 bg-green-100 rounded-full flex items-center justify-center text-green-700 text-3xl font-semibold shadow-lg cursor-default`}
+                    title={`${patientAgent.publicDescription} (Active)`}
+                  >
                     Patient
                   </div>
-                  <span className="mt-2 text-sm font-medium text-gray-700">{patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name}</span>
-                   {selectedAgentName === patientAgent.name && sessionStatus === "CONNECTED" && <span className="text-xs text-green-600">(Active)</span>}
+                  <span className="mt-2 text-md font-medium text-gray-700">{patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name}</span>
+                  {sessionStatus === "CONNECTED" && <span className="text-sm text-green-600 font-semibold">(Active)</span>}
+                  <div className={`
+                    indicator-line
+                    ${activeSpeakerTurn === 'patient' ? 'turn-active patient-turn' : ''}
+                  `}></div>
                 </div>
               )}
-
-              {/* Preceptor Avatar */}
-              {preceptorAgent && (
-                <div
-                  className={`flex flex-col items-center text-center cursor-pointer p-3 rounded-xl transition-all duration-150 ease-in-out
-                              ${selectedAgentName === preceptorAgent.name ? 'bg-purple-200 shadow-lg scale-105' : 'hover:bg-purple-50'}`}
-                  onClick={() => handleAvatarAgentSelect(preceptorAgent.name)}
-                  title={`Switch to ${preceptorAgent.publicDescription}`}
-                >
-                  <div className={`w-28 h-28 border-4 border-purple-500 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 text-2xl font-semibold shadow-md`}>
+              {selectedAgentName === preceptorAgent?.name && preceptorAgent && (
+                <div className="flex flex-col items-center text-center w-1/3">
+                  <div 
+                    className={`w-32 h-32 border-4 border-purple-500 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 text-3xl font-semibold shadow-lg cursor-default`}
+                    title={`${preceptorAgent.publicDescription} (Active)`}
+                  >
                     Preceptor
                   </div>
-                  <span className="mt-2 text-sm font-medium text-gray-700">Preceptor</span>
-                  {selectedAgentName === preceptorAgent.name && sessionStatus === "CONNECTED" && <span className="text-xs text-purple-600">(Active)</span>}
+                  <span className="mt-2 text-md font-medium text-gray-700">Preceptor</span>
+                   {sessionStatus === "CONNECTED" && <span className="text-sm text-purple-600 font-semibold">(Active)</span>}
+                  <div className={`
+                    indicator-line
+                    ${activeSpeakerTurn === 'preceptor' ? 'turn-active preceptor-turn' : ''}
+                  `}></div>
                 </div>
               )}
             </div>
 
-            {/* PTT Button (centralized) */}
-            {sessionStatus === "CONNECTED" && selectedAgentName && (
-              <div className="mt-10">
+            {/* PTT Button (centralized below active conversation) */}
+            <div className="mt-12">
+              {isPTTActive ? (
                 <button
                   onMouseDown={handleTalkButtonDown}
                   onMouseUp={handleTalkButtonUp}
@@ -704,26 +769,70 @@ function KatoPageContent() {
                   onTouchEnd={handleTalkButtonUp}
                   className={`px-10 py-5 rounded-full text-white text-xl font-semibold transition-colors shadow-lg
                               ${isPTTUserSpeaking ? 'bg-red-500 animate-pulse' : 'bg-blue-500 hover:bg-blue-600'}
-                              focus:outline-none focus:ring-4 focus:ring-blue-300 focus:ring-opacity-75`}
+                              focus:outline-none focus:ring-4 focus:ring-blue-300 focus:ring-opacity-75
+                              disabled:opacity-50 disabled:cursor-not-allowed`}
                   disabled={sessionStatus !== "CONNECTED"}
                 >
                   {isPTTUserSpeaking ? "Listening..." : "Push to Talk"}
                 </button>
-              </div>
-            )}
-            {sessionStatus !== "CONNECTED" && selectedAgentName && !manualDisconnect && (
-                 <div className="mt-10 text-gray-600">
-                    <p>Click "Connect" below to start talking to {currentAgentDetails?.name || 'the agent'}.</p>
-                 </div>
-            )}
+              ) : (
+                <button
+                  onClick={() => {
+                    if (sessionStatus === "CONNECTED") {
+                      setIsPTTActive(true); // Switch to PTT mode
+                    }
+                  }}
+                  className={`px-8 py-4 rounded-lg text-gray-700 font-semibold transition-colors shadow-md
+                              border border-gray-400 hover:bg-gray-100 
+                              focus:outline-none focus:ring-4 focus:ring-gray-300 focus:ring-opacity-75
+                              disabled:opacity-50 disabled:cursor-not-allowed`}
+                  disabled={sessionStatus !== "CONNECTED"}
+                >
+                  Switch to Push-to-Talk
+                </button>
+              )}
+            </div>
 
-            {/* "Write" button */}
+            {/* "Write" button - Remains fairly central or below PTT */}
+            {/* 
             <button
               onClick={() => setUiMode('text')}
-              className="mt-10 px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-colors"
+              className="mt-10 px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-colors"
             >
               Switch to Text Input
             </button>
+            */}
+
+            {/* Bottom Left Inactive Agent Toggle Area */}
+            <div className="absolute bottom-6 left-6 flex flex-col space-y-4">
+              {/* Inactive Patient Avatar Toggle */}
+              {selectedAgentName !== patientAgent?.name && patientAgent && (
+                <div
+                  className={`flex flex-col items-center text-center cursor-pointer p-3 rounded-xl transition-all duration-150 ease-in-out hover:bg-green-100 shadow-md hover:shadow-lg`}
+                  onClick={() => handleAvatarAgentSelect(patientAgent.name)}
+                  title={`Switch to ${patientAgent.publicDescription}`}
+                >
+                  <div className={`w-20 h-20 border-2 border-green-400 bg-green-50 rounded-full flex items-center justify-center text-green-600 text-xl font-semibold`}>
+                    Patient
+                  </div>
+                  <span className="mt-1 text-xs font-medium text-gray-600">{patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name}</span>
+                </div>
+              )}
+
+              {/* Inactive Preceptor Avatar Toggle */}
+              {selectedAgentName !== preceptorAgent?.name && preceptorAgent && (
+                <div
+                  className={`flex flex-col items-center text-center cursor-pointer p-3 rounded-xl transition-all duration-150 ease-in-out hover:bg-purple-100 shadow-md hover:shadow-lg`}
+                  onClick={() => handleAvatarAgentSelect(preceptorAgent.name)}
+                  title={`Switch to ${preceptorAgent.publicDescription}`}
+                >
+                  <div className={`w-20 h-20 border-2 border-purple-400 bg-purple-50 rounded-full flex items-center justify-center text-purple-600 text-xl font-semibold`}>
+                    Preceptor
+                  </div>
+                  <span className="mt-1 text-xs font-medium text-gray-600">Preceptor</span>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -736,13 +845,58 @@ function KatoPageContent() {
               downloadRecording={downloadRecording}
               canSend={sessionStatus === "CONNECTED" && dcRef.current?.readyState === "open"}
             />
-            <div className="p-3 flex justify-between items-center border-t bg-gray-50">
-              <button
-                onClick={() => setUiMode('avatar')}
-                className="px-6 py-2 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-colors"
-              >
-                Back to Voice Mode
-              </button>
+
+            {/* PTT Button for Text Mode (if PTT mode is active) */}
+            {currentAudioInputMode === 'ptt' && (
+              <div className="p-4 flex justify-center items-center bg-gray-50">
+                <button
+                  onMouseDown={handleTalkButtonDown}
+                  onMouseUp={handleTalkButtonUp}
+                  onTouchStart={handleTalkButtonDown} // For touch devices
+                  onTouchEnd={handleTalkButtonUp}   // For touch devices
+                  className={`px-10 py-5 rounded-full text-white text-xl font-semibold transition-colors shadow-lg
+                              ${isPTTUserSpeaking ? 'bg-red-500 animate-pulse' : 'bg-blue-500 hover:bg-blue-600'}
+                              focus:outline-none focus:ring-4 focus:ring-blue-300 focus:ring-opacity-75
+                              disabled:opacity-50 disabled:cursor-not-allowed`}
+                  disabled={sessionStatus !== "CONNECTED"}
+                >
+                  {isPTTUserSpeaking ? "Listening..." : "Push to Talk"}
+                </button>
+              </div>
+            )}
+
+            <div className="p-3 flex flex-col sm:flex-row justify-between items-center border-t bg-gray-50 space-y-2 sm:space-y-0 sm:space-x-2">
+              {/* Audio Input Mode Buttons */}
+              <div className="flex space-x-2">
+                <button 
+                  onClick={() => { setCurrentAudioInputMode("conversation"); setIsPTTActive(false); }}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors 
+                              ${currentAudioInputMode === "conversation" ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}
+                              disabled:opacity-50 disabled:cursor-not-allowed`}
+                  disabled={sessionStatus !== "CONNECTED"}
+                >
+                  Conversation
+                </button>
+                <button 
+                  onClick={() => { setCurrentAudioInputMode("ptt"); setIsPTTActive(true); }}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors 
+                              ${currentAudioInputMode === "ptt" ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}
+                              disabled:opacity-50 disabled:cursor-not-allowed`}
+                  disabled={sessionStatus !== "CONNECTED"}
+                >
+                  Push to Talk
+                </button>
+                <button 
+                  onClick={() => { setCurrentAudioInputMode("no_mic"); setIsPTTActive(true); /* PTT true ensures turn_detection=null */ }}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors 
+                              ${currentAudioInputMode === "no_mic" ? "bg-red-500 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}
+                              disabled:opacity-50 disabled:cursor-not-allowed`}
+                  disabled={sessionStatus !== "CONNECTED"}
+                >
+                  No Mic
+                </button>
+              </div>
+
               {/* Audio Playback Toggle */}
               <label className="flex items-center cursor-pointer select-none">
                 <input
@@ -774,6 +928,30 @@ function KatoPageContent() {
             ? "Disconnect"
             : "Connect"}
         </button>
+        {uiMode === 'avatar' && (
+            <button
+              onClick={() => {
+                setUiMode('text');
+                setCurrentAudioInputMode("ptt");
+                setIsPTTActive(true);
+              }}
+              className="px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-colors"
+            >
+              Write
+            </button>
+        )}
+        {uiMode === 'text' && (
+            <button
+              onClick={() => {
+                setUiMode('avatar');
+                setCurrentAudioInputMode("conversation");
+                setIsPTTActive(false);
+              }}
+              className="px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-colors"
+            >
+              Speak
+            </button>
+        )}
         {/* Optional: Display session status explicitly if header is not enough */}
         {/* <span className="text-sm text-gray-600">Status: {sessionStatus}</span> */}
       </div>

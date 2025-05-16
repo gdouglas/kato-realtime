@@ -20,3 +20,49 @@ body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, "Noto Sans", sans-serif;
 }
+
+.indicator-line {
+  height: 2px; /* Or even 1px if 2px is too subtle initially */
+  width: 75%;
+  margin: 8px auto 0;
+  background-color: #e5e7eb; /* Light gray - should be visible on a light background */
+  border-radius: 1px;
+  transition: height 0.2s ease-in-out, background-color 0.2s ease-in-out;
+}
+
+/* For active state (thicker and colored) */
+.indicator-line.turn-active {
+  height: 5px;
+}
+.indicator-line.turn-active.user-turn { background-color: #3b82f6; }
+.indicator-line.turn-active.patient-turn { background-color: #10b981; }
+.indicator-line.turn-active.preceptor-turn { background-color: #8b5cf6; }
+
+@keyframes radiate {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+.radiating-ring {
+  position: absolute;
+  border: 2px solid #3b82f6; /* Blue to match user color */
+  border-radius: 50%;
+  width: 100%; /* Start same size as avatar */
+  height: 100%;
+  animation: radiate 2s infinite ease-out;
+  /* z-index: -1; */ /* Removed to ensure visibility on top of parent background */
+}
+
+.radiating-ring:nth-child(2) {
+  animation-delay: 0.5s;
+}
+
+.radiating-ring:nth-child(3) {
+  animation-delay: 1s;
+}
