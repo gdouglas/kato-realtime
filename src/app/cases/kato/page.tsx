@@ -59,6 +59,7 @@ function KatoPageContent() {
   const [uiMode, setUiMode] = useState<"avatar" | "text">("avatar");
   const [isPTTActive, setIsPTTActive] = useState<boolean>(false); // PTT disabled by default, server VAD is default
   const [currentAudioInputMode, setCurrentAudioInputMode] = useState<"conversation" | "ptt" | "no_mic">("conversation");
+  const [isIntroAudioPlaying, setIsIntroAudioPlaying] = useState<boolean>(false);
 
   const [isPTTUserSpeaking, setIsPTTUserSpeaking] = useState<boolean>(false);
   const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] =
@@ -80,6 +81,10 @@ function KatoPageContent() {
 
   // Ref to track if initial setup for the current agent has been done
   const hasDoneInitialAgentSetupRef = useRef<boolean>(false);
+  // Ref to track if this is the very first agent connection for the page load
+  const isInitialAgentConnectionRef = useRef<boolean>(true);
+  // Ref to track agents whose intro audio has already been played this session
+  const playedIntroForAgentsRef = useRef(new Set<string>());
 
   // State to track the active speaker for UI indication
   const [activeSpeakerTurn, setActiveSpeakerTurn] = useState<
@@ -286,6 +291,15 @@ function KatoPageContent() {
       return;
     }
 
+    // If this agent's intro has already been played (or it has no intro and was thus marked), connect directly.
+    if (playedIntroForAgentsRef.current.has(selectedAgentName)) {
+      addTranscriptBreadcrumb(`Reconnecting to ${selectedAgentName} without replaying intro.`);
+      setIsIntroAudioPlaying(false); // Ensure this is false
+      connectToRealtime();
+      return;
+    }
+
+    setIsIntroAudioPlaying(true); 
     addTranscriptBreadcrumb(isRetryAfterModal ? "Retrying introductory message playback..." : "Preparing introductory message...");
 
     const playAudioAndSetupHandlers = (audioSrcUrl: string, audioBlobToRevoke?: Blob) => {
@@ -293,33 +307,38 @@ function KatoPageContent() {
         introAudioElementRef.current = new Audio();
       }
       const audio = introAudioElementRef.current;
-      const objectUrlToRevoke = audioSrcUrl; // Keep track of the URL to revoke
+      const objectUrlToRevoke = audioSrcUrl;
 
       audio.src = audioSrcUrl;
       audio.play()
         .then(() => {
           addTranscriptBreadcrumb("Introductory message playing.");
-          setShowAudioInteractionModal(false); // Ensure modal is hidden if somehow still visible
+          playedIntroForAgentsRef.current.add(selectedAgentName); // Mark intro as played for this agent
+          setShowAudioInteractionModal(false); 
         })
         .catch(error => {
           console.error("Error playing introductory audio:", error);
+          // Do not mark as played if play itself fails initially, allow retry from modal
+          // playedIntroForAgentsRef.current.add(selectedAgentName); // Moved to .then()
+          setIsIntroAudioPlaying(false); 
           if (error.name === "NotAllowedError" && !isRetryAfterModal) {
             addTranscriptBreadcrumb("Audio playback requires user interaction.");
-            // Don't set URL to revoke here yet, modal will handle it or next error
-            setAudioUrlForModalRetry(audioSrcUrl); // Store the originally created ObjectURL
-            setAudioBlobForModalRetry(audioBlobToRevoke || null); // Store blob if we created it, to re-create URL if needed
+            setAudioUrlForModalRetry(audioSrcUrl); 
+            setAudioBlobForModalRetry(audioBlobToRevoke || null); 
             setShowAudioInteractionModal(true);
-            // Do NOT connect yet, wait for modal interaction
           } else {
             addTranscriptBreadcrumb(`Error playing intro: ${error.message}. Connecting directly.`);
+            playedIntroForAgentsRef.current.add(selectedAgentName); // If other error, mark as attempt to play, then connect
             if (objectUrlToRevoke) URL.revokeObjectURL(objectUrlToRevoke);
-            if (audioBlobForModalRetry) setAudioBlobForModalRetry(null); // Clear blob state
+            if (audioBlobForModalRetry) setAudioBlobForModalRetry(null); 
             setAudioUrlForModalRetry(null);
             connectToRealtime();
           }
         });
 
       audio.onended = () => {
+        // playedIntroForAgentsRef.current.add(selectedAgentName); // Already added in .then()
+        setIsIntroAudioPlaying(false); 
         addTranscriptBreadcrumb("Introductory message finished. Connecting to Realtime...");
         if (objectUrlToRevoke) URL.revokeObjectURL(objectUrlToRevoke);
         if (audioBlobForModalRetry) setAudioBlobForModalRetry(null);
@@ -328,6 +347,8 @@ function KatoPageContent() {
       };
 
       audio.onerror = (e) => {
+        // playedIntroForAgentsRef.current.add(selectedAgentName); // Already added in .then() or catch()
+        setIsIntroAudioPlaying(false); 
         console.error("Error during audio playback (onerror):", e);
         addTranscriptBreadcrumb("Error during intro playback. Connecting directly.");
         if (objectUrlToRevoke) URL.revokeObjectURL(objectUrlToRevoke);
@@ -338,18 +359,13 @@ function KatoPageContent() {
     };
 
     if (isRetryAfterModal && audioUrlForModalRetry) {
-        // We are retrying after modal, use the stored URL
         playAudioAndSetupHandlers(audioUrlForModalRetry);
-        // The original blob URL is already stored in audioUrlForModalRetry
-        // No need to re-fetch, just replay.
     } else if (!isRetryAfterModal) {
         const agentConfig = selectedAgentConfigSet?.find(a => a.name === selectedAgentName);
         const introText = agentConfig?.introAudio?.text;
-        const introInstructions = agentConfig?.introAudio?.instructions;
-        const introVoice = agentConfig?.introAudio?.voice || "shimmer";
-        const introModel = agentConfig?.introAudio?.model || "gpt-4o-mini-tts";
 
         if (introText) {
+            // If intro already played (checked at the top), this block is skipped.
             try {
                 addTranscriptBreadcrumb("Fetching introductory audio...");
                 const response = await fetch(`${API_BASE_URL}/api/v1/audio/speech`, {
@@ -357,45 +373,46 @@ function KatoPageContent() {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         input: introText,
-                        model: introModel,
-                        voice: introVoice,
-                        instructions: introInstructions,
+                        model: agentConfig?.introAudio?.model || "gpt-4o-mini-tts",
+                        voice: agentConfig?.introAudio?.voice || "shimmer",
+                        instructions: agentConfig?.introAudio?.instructions,
                     }),
                 });
-
                 if (!response.ok) {
                     const errorData = await response.text();
                     throw new Error(`Failed to fetch introductory audio: ${response.status} ${errorData}`);
                 }
-
                 const newAudioBlob = await response.blob();
                 const newAudioUrl = URL.createObjectURL(newAudioBlob);
                 playAudioAndSetupHandlers(newAudioUrl, newAudioBlob);
-
             } catch (error: any) {
+                setIsIntroAudioPlaying(false);
+                playedIntroForAgentsRef.current.add(selectedAgentName); // Mark as attempted even if fetch fails
                 console.error("Error fetching introductory message:", error);
                 addTranscriptBreadcrumb(`Error fetching intro: ${error.message}. Connecting directly.`);
                 connectToRealtime();
             }
         } else {
+            setIsIntroAudioPlaying(false); 
+            playedIntroForAgentsRef.current.add(selectedAgentName); // No intro text, mark as "introduced"
             addTranscriptBreadcrumb("No introductory message configured. Connecting to Realtime...");
             connectToRealtime();
         }
     } else {
-        // Fallback if called as retry but no URL - should not happen
+        setIsIntroAudioPlaying(false); 
+        // This case is for retry after modal, but something went wrong with audioUrlForModalRetry
+        // We can assume if we got here, the intro attempt for this agent is done.
+        playedIntroForAgentsRef.current.add(selectedAgentName); 
         console.warn("Retry called without valid audio URL. Connecting directly.");
         connectToRealtime();
     }
-  }, [sessionStatus, selectedAgentName, selectedAgentConfigSet, connectToRealtime, addTranscriptBreadcrumb, audioUrlForModalRetry]);
+  }, [sessionStatus, selectedAgentName, selectedAgentConfigSet, connectToRealtime, addTranscriptBreadcrumb, audioUrlForModalRetry, setIsIntroAudioPlaying]);
 
   const handleModalOkAndRetryAudio = () => {
     setShowAudioInteractionModal(false);
     if (audioUrlForModalRetry) {
-      // Call playIntroductoryMessageThenConnect in "retry" mode.
-      // It will use the existing audioUrlForModalRetry.
       playIntroductoryMessageThenConnect(true);
     } else {
-      // This case should ideally not be reached if modal was shown due to NotAllowedError
       addTranscriptBreadcrumb("No audio to retry. Connecting directly.");
       connectToRealtime();
     }
@@ -415,8 +432,7 @@ function KatoPageContent() {
   // Connect to Realtime when agent is selected and disconnected (and not manually disconnected)
   useEffect(() => {
     if (selectedAgentName && sessionStatus === "DISCONNECTED" && !manualDisconnect) {
-      // connectToRealtime(); // OLD WAY
-      playIntroductoryMessageThenConnect(); // NEW WAY
+      playIntroductoryMessageThenConnect();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // TODO: connectToRealtime was removed from deps to prevent infinite loop.
@@ -437,7 +453,14 @@ function KatoPageContent() {
         (a) => a.name === selectedAgentName
       );
       addTranscriptBreadcrumb(`Switched to Agent: ${currentAgent?.publicDescription || selectedAgentName}`, currentAgent);
-      updateSession(true); // Send initial message
+      
+      if (isInitialAgentConnectionRef.current) {
+        updateSession(false); // Don't send "hi" on the very first agent connection
+        isInitialAgentConnectionRef.current = false; // Mark that the initial connection has occurred
+      } else {
+        updateSession(true); // Send "hi" on subsequent agent switches
+      }
+
       hasDoneInitialAgentSetupRef.current = true; // Mark setup as done for this agent session
     }
   }, [selectedAgentConfigSet, selectedAgentName, sessionStatus, updateSession, addTranscriptBreadcrumb]);
@@ -500,7 +523,7 @@ function KatoPageContent() {
     if (!userText.trim()) return;
     cancelAssistantSpeech();
     const messageId = uuidv4().slice(0,32);
-    addTranscriptMessage(messageId, "user", userText.trim(), true);
+    addTranscriptMessage(messageId, "user", userText.trim(), false);
     sendClientEvent(
       {
         type: "conversation.item.create",
@@ -542,8 +565,7 @@ function KatoPageContent() {
     } else {
       setManualDisconnect(false); // Reset manual disconnect flag before attempting to connect
       if (selectedAgentName) {
-        // connectToRealtime(); // OLD WAY
-        playIntroductoryMessageThenConnect(); // NEW WAY
+        playIntroductoryMessageThenConnect();
       } else {
         addTranscriptBreadcrumb("Please select an agent before connecting.");
         console.warn("Connect attempt without selected agent.");
@@ -562,8 +584,7 @@ function KatoPageContent() {
     if (newAgentName === selectedAgentName && isDisconnectedOrError) {
        // If same agent but disconnected, try to reconnect to this agent
       setManualDisconnect(false);
-      // connectToRealtime(); // OLD WAY
-      playIntroductoryMessageThenConnect(); // NEW WAY
+      playIntroductoryMessageThenConnect();
       return;
     }
 
@@ -623,43 +644,42 @@ function KatoPageContent() {
 
     let newTurn: 'user' | 'patient' | 'preceptor' | 'none' = 'none';
 
-    if (isOutputAudioBufferActive) { // Agent is actively speaking
+    if (isIntroAudioPlaying) {
+      // Assuming the intro audio is spoken by the preceptor, as it's the initial agent.
+      // If other agents could play intros first, this logic might need to be more dynamic.
+      newTurn = "preceptor";
+    } else if (isOutputAudioBufferActive) { // Agent is actively speaking via WebRTC
       if (selectedAgentName === patientAgentName) {
         newTurn = "patient";
       } else if (selectedAgentName === preceptorAgentName) {
         newTurn = "preceptor";
       } else {
-        // Potentially other agent types, or default to 'none' if agent isn't patient/preceptor
         newTurn = "none"; 
       }
-    } else { // Agent is NOT speaking, so it's implicitly user's turn or waiting for user
+    } else { // Agent is NOT speaking via WebRTC, so it's implicitly user's turn or waiting for user
       newTurn = "user";
-      // Note: isPTTUserSpeaking (for radiating rings) is handled separately and only applies if isPTTActive is true.
-      // The turn is 'user' here regardless of whether PTT button is currently down or VAD is active.
     }
     
     setActiveSpeakerTurn(newTurn);
 
-    // Update ref for next render (used for detecting when agent *stops* speaking, though the logic above might make this less critical)
     prevIsOutputAudioBufferActiveRef.current = isOutputAudioBufferActive;
 
-  }, [isPTTActive, isPTTUserSpeaking, isOutputAudioBufferActive, selectedAgentName, selectedAgentConfigSet]);
+  }, [isIntroAudioPlaying, isPTTActive, isPTTUserSpeaking, isOutputAudioBufferActive, selectedAgentName, selectedAgentConfigSet]); // Added isIntroAudioPlaying
 
   return (
     <div className="text-base flex flex-col h-screen bg-gray-100 text-gray-800 relative">
       {/* Header: Title, current agent name/status */}
       <div className="p-4 text-lg font-semibold flex justify-between items-center border-b bg-white shadow-sm">
         <div
-          className="flex items-center cursor-pointer"
-          onClick={() => window.location.reload()}
+          className="flex items-center"
         >
           <Image
-            src="/openai-logomark.svg"
-            alt="OpenAI Logo"
-            width={24}
-            height={24}
+            src="/logos/UBC-crest-blue.png"
+            alt="UBC Logo"
+            width={48}
+            height={48}
             className="mr-3"
-          />
+          /><span className="text-gray-500 font-medium text-lg mr-2 ml-2 h-full border-l border-gray-300">&nbsp;</span>
           <span className="font-bold text-xl">
             Medical History: Mr. Kato <span className="text-gray-500 font-medium text-lg">Case</span>
           </span>
@@ -844,6 +864,10 @@ function KatoPageContent() {
               onSendMessage={handleSendTextMessage}
               downloadRecording={downloadRecording}
               canSend={sessionStatus === "CONNECTED" && dcRef.current?.readyState === "open"}
+              selectedAgentName={selectedAgentName}
+              patientAgent={patientAgent || null}
+              preceptorAgent={preceptorAgent || null}
+              handleAvatarAgentSelect={handleAvatarAgentSelect}
             />
 
             {/* PTT Button for Text Mode (if PTT mode is active) */}

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { TranscriptItem } from "@/app/types";
+import { TranscriptItem, AgentConfig } from "@/app/types";
 import Image from "next/image";
 import { useTranscript } from "@/app/contexts/TranscriptContext";
 import { DownloadIcon, ClipboardCopyIcon } from "@radix-ui/react-icons";
@@ -14,6 +14,10 @@ export interface TranscriptProps {
   onSendMessage: () => void;
   canSend: boolean;
   downloadRecording: () => void;
+  selectedAgentName?: string;
+  patientAgent?: AgentConfig | null;
+  preceptorAgent?: AgentConfig | null;
+  handleAvatarAgentSelect?: (agentName: string) => void;
 }
 
 function Transcript({
@@ -22,6 +26,10 @@ function Transcript({
   onSendMessage,
   canSend,
   downloadRecording,
+  selectedAgentName,
+  patientAgent,
+  preceptorAgent,
+  handleAvatarAgentSelect,
 }: TranscriptProps) {
   const { transcriptItems, toggleTranscriptItemExpand } = useTranscript();
   const transcriptRef = useRef<HTMLDivElement | null>(null);
@@ -74,7 +82,35 @@ function Transcript({
     <div className="flex flex-col flex-1 bg-white min-h-0 rounded-xl">
       <div className="flex flex-col flex-1 min-h-0">
         <div className="flex items-center justify-between px-6 py-3 sticky top-0 z-10 text-base border-b bg-white rounded-t-xl">
-          <span className="font-semibold">Transcript</span>
+          <div className="flex items-center gap-x-3">
+            <span className="font-semibold">Transcript</span>
+            {selectedAgentName && patientAgent && preceptorAgent && handleAvatarAgentSelect && (
+              <div className="flex items-center text-sm">
+                <span className="text-gray-500 mr-2">Current:</span>
+                <span className="font-medium">
+                  {selectedAgentName === patientAgent.name ? (patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name) : "Preceptor"}
+                </span>
+                {selectedAgentName === patientAgent.name && preceptorAgent && (
+                  <button
+                    onClick={() => handleAvatarAgentSelect(preceptorAgent.name)}
+                    className="ml-3 px-2 py-1 rounded-md bg-purple-100 text-purple-700 hover:bg-purple-200 text-xs"
+                    title={`Switch to ${preceptorAgent.publicDescription}`}
+                  >
+                    Switch to Preceptor
+                  </button>
+                )}
+                {selectedAgentName === preceptorAgent.name && patientAgent && (
+                  <button
+                    onClick={() => handleAvatarAgentSelect(patientAgent.name)}
+                    className="ml-3 px-2 py-1 rounded-md bg-green-100 text-green-700 hover:bg-green-200 text-xs"
+                    title={`Switch to ${patientAgent.publicDescription}`}
+                  >
+                    Switch to {patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <div className="flex gap-x-2">
             <button
               onClick={handleCopyTranscript}
@@ -227,7 +263,7 @@ function Transcript({
           disabled={!canSend || !userText.trim()}
           className="bg-gray-900 text-white rounded-full px-2 py-2 disabled:opacity-50"
         >
-          <Image src="arrow.svg" alt="Send" width={24} height={24} />
+          <Image src="/arrow.svg" alt="Send" width={24} height={24} />
         </button>
       </div>
     </div>
