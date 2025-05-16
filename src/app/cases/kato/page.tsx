@@ -69,6 +69,14 @@ function KatoPageContent() {
   const { startRecording, stopRecording, downloadRecording } =
     useAudioDownload();
 
+  // Ref for the introductory audio element
+  const introAudioElementRef = useRef<HTMLAudioElement | null>(null);
+
+  // State for the audio interaction modal
+  const [showAudioInteractionModal, setShowAudioInteractionModal] = useState<boolean>(false);
+  const [audioUrlForModalRetry, setAudioUrlForModalRetry] = useState<string | null>(null);
+  const [audioBlobForModalRetry, setAudioBlobForModalRetry] = useState<Blob | null>(null);
+
   const sendClientEvent = useCallback((eventObj: any, eventNameSuffix = "") => {
     if (dcRef.current && dcRef.current.readyState === "open") {
       logClientEvent(eventObj, eventNameSuffix);
@@ -244,6 +252,129 @@ function KatoPageContent() {
     }
   }, [sendClientEvent, selectedAgentConfigSet, selectedAgentName, isPTTActive, sendSimulatedUserMessage]);
 
+  const playIntroductoryMessageThenConnect = useCallback(async (isRetryAfterModal = false) => {
+    if (!isRetryAfterModal && (sessionStatus === "CONNECTING" || sessionStatus === "CONNECTED" || !selectedAgentName)) {
+      console.warn(
+        `playIntroductoryMessageThenConnect called while status is ${sessionStatus} or no agent selected. Aborting.`
+      );
+      return;
+    }
+
+    addTranscriptBreadcrumb(isRetryAfterModal ? "Retrying introductory message playback..." : "Preparing introductory message...");
+
+    const playAudioAndSetupHandlers = (audioSrcUrl: string, audioBlobToRevoke?: Blob) => {
+      if (!introAudioElementRef.current) {
+        introAudioElementRef.current = new Audio();
+      }
+      const audio = introAudioElementRef.current;
+      const objectUrlToRevoke = audioSrcUrl; // Keep track of the URL to revoke
+
+      audio.src = audioSrcUrl;
+      audio.play()
+        .then(() => {
+          addTranscriptBreadcrumb("Introductory message playing.");
+          setShowAudioInteractionModal(false); // Ensure modal is hidden if somehow still visible
+        })
+        .catch(error => {
+          console.error("Error playing introductory audio:", error);
+          if (error.name === "NotAllowedError" && !isRetryAfterModal) {
+            addTranscriptBreadcrumb("Audio playback requires user interaction.");
+            // Don't set URL to revoke here yet, modal will handle it or next error
+            setAudioUrlForModalRetry(audioSrcUrl); // Store the originally created ObjectURL
+            setAudioBlobForModalRetry(audioBlobToRevoke || null); // Store blob if we created it, to re-create URL if needed
+            setShowAudioInteractionModal(true);
+            // Do NOT connect yet, wait for modal interaction
+          } else {
+            addTranscriptBreadcrumb(`Error playing intro: ${error.message}. Connecting directly.`);
+            if (objectUrlToRevoke) URL.revokeObjectURL(objectUrlToRevoke);
+            if (audioBlobForModalRetry) setAudioBlobForModalRetry(null); // Clear blob state
+            setAudioUrlForModalRetry(null);
+            connectToRealtime();
+          }
+        });
+
+      audio.onended = () => {
+        addTranscriptBreadcrumb("Introductory message finished. Connecting to Realtime...");
+        if (objectUrlToRevoke) URL.revokeObjectURL(objectUrlToRevoke);
+        if (audioBlobForModalRetry) setAudioBlobForModalRetry(null);
+        setAudioUrlForModalRetry(null);
+        connectToRealtime();
+      };
+
+      audio.onerror = (e) => {
+        console.error("Error during audio playback (onerror):", e);
+        addTranscriptBreadcrumb("Error during intro playback. Connecting directly.");
+        if (objectUrlToRevoke) URL.revokeObjectURL(objectUrlToRevoke);
+        if (audioBlobForModalRetry) setAudioBlobForModalRetry(null);
+        setAudioUrlForModalRetry(null);
+        connectToRealtime();
+      };
+    };
+
+    if (isRetryAfterModal && audioUrlForModalRetry) {
+        // We are retrying after modal, use the stored URL
+        playAudioAndSetupHandlers(audioUrlForModalRetry);
+        // The original blob URL is already stored in audioUrlForModalRetry
+        // No need to re-fetch, just replay.
+    } else if (!isRetryAfterModal) {
+        const agentConfig = selectedAgentConfigSet?.find(a => a.name === selectedAgentName);
+        const introText = agentConfig?.introAudio?.text;
+        const introInstructions = agentConfig?.introAudio?.instructions;
+        const introVoice = agentConfig?.introAudio?.voice || "shimmer";
+        const introModel = agentConfig?.introAudio?.model || "gpt-4o-mini-tts";
+
+        if (introText) {
+            try {
+                addTranscriptBreadcrumb("Fetching introductory audio...");
+                const response = await fetch(`${API_BASE_URL}/api/v1/audio/speech`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        input: introText,
+                        model: introModel,
+                        voice: introVoice,
+                        instructions: introInstructions,
+                    }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.text();
+                    throw new Error(`Failed to fetch introductory audio: ${response.status} ${errorData}`);
+                }
+
+                const newAudioBlob = await response.blob();
+                const newAudioUrl = URL.createObjectURL(newAudioBlob);
+                playAudioAndSetupHandlers(newAudioUrl, newAudioBlob);
+
+            } catch (error: any) {
+                console.error("Error fetching introductory message:", error);
+                addTranscriptBreadcrumb(`Error fetching intro: ${error.message}. Connecting directly.`);
+                connectToRealtime();
+            }
+        } else {
+            addTranscriptBreadcrumb("No introductory message configured. Connecting to Realtime...");
+            connectToRealtime();
+        }
+    } else {
+        // Fallback if called as retry but no URL - should not happen
+        console.warn("Retry called without valid audio URL. Connecting directly.");
+        connectToRealtime();
+    }
+  }, [sessionStatus, selectedAgentName, selectedAgentConfigSet, connectToRealtime, addTranscriptBreadcrumb, audioUrlForModalRetry]);
+
+  const handleModalOkAndRetryAudio = () => {
+    setShowAudioInteractionModal(false);
+    if (audioUrlForModalRetry) {
+      // Call playIntroductoryMessageThenConnect in "retry" mode.
+      // It will use the existing audioUrlForModalRetry.
+      playIntroductoryMessageThenConnect(true);
+    } else {
+      // This case should ideally not be reached if modal was shown due to NotAllowedError
+      addTranscriptBreadcrumb("No audio to retry. Connecting directly.");
+      connectToRealtime();
+    }
+  };
+
   // Initialize agent configuration for this specific page
   useEffect(() => {
     const agents = medicalHistoryTakingAgents; // Use the imported agents
@@ -258,13 +389,15 @@ function KatoPageContent() {
   // Connect to Realtime when agent is selected and disconnected (and not manually disconnected)
   useEffect(() => {
     if (selectedAgentName && sessionStatus === "DISCONNECTED" && !manualDisconnect) {
-      connectToRealtime();
+      // connectToRealtime(); // OLD WAY
+      playIntroductoryMessageThenConnect(); // NEW WAY
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // TODO: connectToRealtime was removed from deps to prevent infinite loop.
     // Proper fix involves stabilizing connectToRealtime (and its dependency handleServerEventRef)
-    // so it can be safely included in the dependency array.
-  }, [selectedAgentName, sessionStatus, manualDisconnect]); // connectToRealtime REMOVED
+    // so it can be safely included in the dependency array. 
+    // playIntroductoryMessageThenConnect is now a dependency.
+  }, [selectedAgentName, sessionStatus, manualDisconnect, playIntroductoryMessageThenConnect]); // connectToRealtime REMOVED, playIntroductoryMessageThenConnect ADDED
 
   // Update session when connected
   useEffect(() => {
@@ -366,9 +499,9 @@ function KatoPageContent() {
       setManualDisconnect(true);
     } else {
       setManualDisconnect(false); // Reset manual disconnect flag before attempting to connect
-      // Ensure an agent is selected before connecting, or connect logic handles it
       if (selectedAgentName) {
-        connectToRealtime();
+        // connectToRealtime(); // OLD WAY
+        playIntroductoryMessageThenConnect(); // NEW WAY
       } else {
         addTranscriptBreadcrumb("Please select an agent before connecting.");
         console.warn("Connect attempt without selected agent.");
@@ -387,7 +520,8 @@ function KatoPageContent() {
     if (newAgentName === selectedAgentName && isDisconnectedOrError) {
        // If same agent but disconnected, try to reconnect to this agent
       setManualDisconnect(false);
-      connectToRealtime();
+      // connectToRealtime(); // OLD WAY
+      playIntroductoryMessageThenConnect(); // NEW WAY
       return;
     }
 
@@ -476,6 +610,28 @@ function KatoPageContent() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 overflow-y-auto">
+        {/* Audio Interaction Modal */}
+        {showAudioInteractionModal && (
+          <div className="absolute inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50 p-4">
+            <div className="bg-white p-8 rounded-lg shadow-xl text-center max-w-md">
+              <h3 className="text-xl font-semibold mb-4 text-gray-800">Audio Playback</h3>
+              <p className="mb-6 text-gray-600">
+                This application works best as an audio-based conversation. Please ensure your
+                microphone and speakers (or headphones) are enabled.
+              </p>
+              <p className="mb-6 text-sm text-gray-500">
+                Click "OK" to enable audio for the introductory message.
+              </p>
+              <button
+                onClick={handleModalOkAndRetryAudio}
+                className="px-8 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 transition-colors"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        )}
+
         {uiMode === 'avatar' && (
           <div className="flex flex-col items-center justify-center gap-8 w-full max-w-2xl">
             {/* Avatars Row */}

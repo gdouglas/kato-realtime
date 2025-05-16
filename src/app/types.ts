@@ -51,6 +51,12 @@ export interface AgentConfig {
   tools: Tool[];
   model?: string; // Optional model specification
   voice?: string; // Optional voice setting for text-to-speech
+  introAudio?: { // Optional introductory audio message configuration
+    text: string; // The text to be spoken
+    instructions?: string; // Optional instructions for TTS voice affect, tone, pacing etc.
+    voice?: string; // Optional voice for TTS (e.g., 'shimmer', 'alloy')
+    model?: string; // Optional TTS model (e.g., 'gpt-4o-mini-tts')
+  };
   toolLogic?: Record<
     string,
     (args: any, transcriptLogsFiltered: TranscriptItem[]) => Promise<any> | any
