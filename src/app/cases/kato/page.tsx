@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 // Removed useSearchParams as agentConfig is fixed
 import { v4 as uuidv4 } from "uuid";
+import { motion } from "framer-motion";
 
 import Image from "next/image";
 
@@ -78,6 +79,16 @@ function KatoPageContent() {
   const [showAudioInteractionModal, setShowAudioInteractionModal] = useState<boolean>(false);
   const [audioUrlForModalRetry, setAudioUrlForModalRetry] = useState<string | null>(null);
   const [audioBlobForModalRetry, setAudioBlobForModalRetry] = useState<Blob | null>(null);
+
+  // Refs and state for dynamic indicator positioning
+  const linePositioningParentRef = useRef<HTMLDivElement>(null); // Parent for line's coordinate system
+  const userAvatarCircleRef = useRef<HTMLDivElement>(null);      // User's avatar circle
+  const patientAvatarCircleRef = useRef<HTMLDivElement>(null);   // Patient's avatar circle
+  const preceptorAvatarCircleRef = useRef<HTMLDivElement>(null); // Preceptor's avatar circle
+  const indicatorLineRef = useRef<HTMLDivElement>(null); // Ref for the indicator line itself
+  
+  const [indicatorTargets, setIndicatorTargets] = useState({ user: 0, agent: 0 });
+  // const [indicatorWidthPx, setIndicatorWidthPx] = useState(96); // No longer strictly needed if measured
 
   // Ref to track if initial setup for the current agent has been done
   const hasDoneInitialAgentSetupRef = useRef<boolean>(false);
@@ -666,6 +677,49 @@ function KatoPageContent() {
 
   }, [isIntroAudioPlaying, isPTTActive, isPTTUserSpeaking, isOutputAudioBufferActive, selectedAgentName, selectedAgentConfigSet]); // Added isIntroAudioPlaying
 
+  // Effect to calculate and update indicator positions
+  useEffect(() => {
+    const calculatePositions = () => {
+      const parentEl = linePositioningParentRef.current;
+      const userCircleEl = userAvatarCircleRef.current;
+      const lineEl = indicatorLineRef.current;
+      let activeAgentCircleEl: HTMLDivElement | null = null;
+
+      if (selectedAgentName === patientAgent?.name) {
+        activeAgentCircleEl = patientAvatarCircleRef.current;
+      } else if (selectedAgentName === preceptorAgent?.name) {
+        activeAgentCircleEl = preceptorAvatarCircleRef.current;
+      }
+
+      if (parentEl && userCircleEl && activeAgentCircleEl && lineEl) {
+        const parentRect = parentEl.getBoundingClientRect();
+        const userCircleRect = userCircleEl.getBoundingClientRect();
+        const agentCircleRect = activeAgentCircleEl.getBoundingClientRect();
+        const actualIndicatorWidth = lineEl.getBoundingClientRect().width;
+
+        // Calculate center of user avatar circle relative to the line's positioning parent
+        const userCircleCenterX = (userCircleRect.left - parentRect.left) + (userCircleRect.width / 2);
+        const userIndicatorX = userCircleCenterX - (actualIndicatorWidth / 2);
+
+        // Calculate center of active agent avatar circle relative to the line's positioning parent
+        const agentCircleCenterX = (agentCircleRect.left - parentRect.left) + (agentCircleRect.width / 2);
+        const agentIndicatorX = agentCircleCenterX - (actualIndicatorWidth / 2);
+        
+        setIndicatorTargets({ user: userIndicatorX, agent: agentIndicatorX });
+      } else {
+        // Fallback or initial state if elements aren't rendered/refs not attached yet
+      }
+    };
+
+    calculatePositions();
+    window.addEventListener('resize', calculatePositions);
+
+    return () => {
+      window.removeEventListener('resize', calculatePositions);
+    };
+  }, [selectedAgentName, selectedAgentConfigSet, patientAgent, preceptorAgent]); 
+  // Removed indicatorWidthPx from deps as it's now measured
+
   return (
     <div className="text-base flex flex-col h-screen bg-gray-100 text-gray-800 relative">
       {/* Header: Title, current agent name/status */}
@@ -724,10 +778,11 @@ function KatoPageContent() {
           <div className="flex flex-col items-center justify-center gap-8 w-full max-w-3xl relative h-full">
             
             {/* Central Active Conversation Area */}
-            <div className="flex justify-around w-full items-start mt-8">
+            {/* New container for avatars and the animated line */}
+            <div ref={linePositioningParentRef} className="relative flex justify-around w-full items-start mt-8">
               {/* User Avatar */}
-              <div className="flex flex-col items-center text-center w-1/3">
-                <div className={`relative w-32 h-32 border-4 border-blue-500 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 text-3xl font-semibold shadow-lg`}>
+              <div className="flex flex-col items-center text-center w-1/3"> 
+                <div ref={userAvatarCircleRef} className={`box-content relative w-48 h-48 border-4 border-blue-500 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 text-3xl font-semibold shadow-lg`}>
                   <span style={{ position: 'relative', zIndex: 1 }}>You</span>
                   {isPTTUserSpeaking && (
                     <>
@@ -737,46 +792,51 @@ function KatoPageContent() {
                     </>
                   )}
                 </div>
-                <span className="mt-2 text-md font-medium text-gray-700">Your Microphone</span>
-                <div className={`
-                  indicator-line
-                  ${activeSpeakerTurn === 'user' ? 'turn-active user-turn' : ''}
-                `}></div>
               </div>
 
-              {/* Active Agent Avatar (Patient OR Preceptor) */}
-              {selectedAgentName === patientAgent?.name && patientAgent && (
-                <div className="flex flex-col items-center text-center w-1/3">
-                  <div 
-                    className={`w-32 h-32 border-4 border-green-500 bg-green-100 rounded-full flex items-center justify-center text-green-700 text-3xl font-semibold shadow-lg cursor-default`}
-                    title={`${patientAgent.publicDescription} (Active)`}
-                  >
-                    Patient
-                  </div>
-                  <span className="mt-2 text-md font-medium text-gray-700">{patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name}</span>
-                  {sessionStatus === "CONNECTED" && <span className="text-sm text-green-600 font-semibold">(Active)</span>}
-                  <div className={`
-                    indicator-line
-                    ${activeSpeakerTurn === 'patient' ? 'turn-active patient-turn' : ''}
-                  `}></div>
-                </div>
-              )}
-              {selectedAgentName === preceptorAgent?.name && preceptorAgent && (
-                <div className="flex flex-col items-center text-center w-1/3">
-                  <div 
-                    className={`w-32 h-32 border-4 border-purple-500 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 text-3xl font-semibold shadow-lg cursor-default`}
-                    title={`${preceptorAgent.publicDescription} (Active)`}
-                  >
-                    Preceptor
-                  </div>
-                  <span className="mt-2 text-md font-medium text-gray-700">Preceptor</span>
-                   {sessionStatus === "CONNECTED" && <span className="text-sm text-purple-600 font-semibold">(Active)</span>}
-                  <div className={`
-                    indicator-line
-                    ${activeSpeakerTurn === 'preceptor' ? 'turn-active preceptor-turn' : ''}
-                  `}></div>
-                </div>
-              )}
+              {/* Active Agent Avatar (Patient OR Preceptor) - This section itself will be one of the two items for the line */}
+              <div className="flex flex-col items-center text-center w-1/3"> {/* This is agentAvatarContainerRef from before, no longer used for direct calc */} 
+                {selectedAgentName === patientAgent?.name && patientAgent && (
+                  <>
+                    <div 
+                      ref={patientAvatarCircleRef} // Ref for patient circle
+                      className={`box-content relative w-32 h-32 border-4 border-green-500 bg-green-100 rounded-full flex items-center justify-center text-green-700 text-3xl font-semibold shadow-lg cursor-default`}
+                      title={`${patientAgent.publicDescription} (Active)`}
+                    >
+                      Patient
+                    </div>
+                    <span className="mt-2 text-md font-medium text-gray-700">{patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name}</span>
+                    {/* REMOVED old patient indicator line */}
+                  </>
+                )}
+                {selectedAgentName === preceptorAgent?.name && preceptorAgent && (
+                  <>
+                    <div 
+                      ref={preceptorAvatarCircleRef} // Ref for preceptor circle
+                      className={`box-content relative w-48 h-48 border-4 border-purple-500 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 text-3xl font-semibold shadow-lg cursor-default`}
+                      title={`${preceptorAgent.publicDescription} (Active)`}
+                    >
+                      Preceptor
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              {/* Shared Animated Indicator Line */}
+              <motion.div
+                ref={indicatorLineRef} // Added ref to the indicator line
+                className="absolute bottom-[-20px] h-1 w-24" // w-24 provides an initial estimate, actual width is measured
+                style={{ left: 0 }} // x translation will be relative to this parent's left edge
+                variants={{
+                  user: { x: indicatorTargets.user, opacity: 1, backgroundColor: "rgb(59 130 246)" }, 
+                  patient: { x: indicatorTargets.agent, opacity: 1, backgroundColor: "rgb(34 197 94)" }, 
+                  preceptor: { x: indicatorTargets.agent, opacity: 1, backgroundColor: "rgb(168 85 247)" }, 
+                  none: { opacity: 0 }
+                }}
+                animate={activeSpeakerTurn}
+                initial="none"
+                transition={{ duration: 0.4, ease: "easeInOut" }}
+              />
             </div>
 
             {/* PTT Button (centralized below active conversation) */}
