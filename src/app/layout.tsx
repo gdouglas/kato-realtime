@@ -2,7 +2,7 @@ import { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: "Realtime API Agents",
+  title: "Mr Kato - Realtime Patient Simulator",
   description: "A demo app from OpenAI.",
 };
 

@@ -39,6 +39,10 @@ import { useAgentContext } from "@/app/contexts/AgentContext";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
+// Placeholder for KatoEvents - in a real scenario, add to KatoEvents.ts
+const AGENT_INTRO_STARTED_EVENT = "kato_event_agent_intro_started";
+const AGENT_INTRO_FINISHED_EVENT = "kato_event_agent_intro_finished";
+
 function KatoSpeakPageContent() {
   const eventBus = useEventBus();
   const router = useRouter();
@@ -91,11 +95,22 @@ function KatoSpeakPageContent() {
   
   // useAudioDownload hook is not directly used by UI buttons on this page.
 
+  const [playedAgentIntros, setPlayedAgentIntros] = useState<Set<string>>(new Set());
+  const prevIntroAudioPlayingRef = useRef<boolean>(false);
+  const introCycleForAgentNameRef = useRef<string | null>(null); // To flag an agent cycle that should start with an intro
+
+  // Controls whether useIntroAudio hook is actively trying to play for the current agent
+  const agentForIntroHook = currentAgentConfig && !playedAgentIntros.has(currentAgentConfig.name)
+    ? currentAgentConfig
+    : null;
+  // Log added for debugging agentForIntroHook decision
+  console.log(`[SpeakPage] AGENT_FOR_INTRO_HOOK_CALC: currentAgent: ${currentAgentConfig?.name}, playedAgentIntros: ${JSON.stringify(Array.from(playedAgentIntros))}, => agentForIntroHook: ${agentForIntroHook?.name || 'null'}`);
+
   const { isIntroAudioPlaying } = useIntroAudio({
     addTranscriptBreadcrumb,
     sessionStatus, 
     manualDisconnect, 
-    currentAgentConfig, 
+    currentAgentConfig: agentForIntroHook, // Pass the conditional agent config
   });
 
   const introButtonClickedRef = useRef(false);
@@ -126,7 +141,8 @@ function KatoSpeakPageContent() {
   }, [selectedAgentName]);
 
   useEffect(() => {
-    const handleAgentChangedPageLogic = () => { // Data param removed as not used
+    const handleAgentChangedPageLogic = (data?: { agentName?: string }) => { 
+      console.log(`[SpeakPage] AGENT_DEBUG: CURRENT_AGENT_CHANGED event. Agent: ${data?.agentName}. Resetting hasDoneInitialAgentSetupRef.`);
       hasDoneInitialAgentSetupRef.current = false;
     };
     const subChange = eventBus.on(KatoEvents.CURRENT_AGENT_CHANGED, handleAgentChangedPageLogic);
@@ -153,7 +169,10 @@ function KatoSpeakPageContent() {
   }, [eventBus, addTranscriptBreadcrumb, sessionStatus, manualDisconnect]); 
 
   useEffect(() => {
-    const performUpdateSession = (data?: { shouldTriggerResponse?: boolean }) => {
+    const performUpdateSession = (data?: { 
+      shouldTriggerResponse?: boolean; 
+      isIntroSequence?: boolean; // Added for explicit intro handling
+    }) => {
         if (!currentAgentConfig) return;
         eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
             eventObj: { type: "input_audio_buffer.clear" },
@@ -167,6 +186,11 @@ function KatoSpeakPageContent() {
         if (currentAudioInputMode === "no_mic") { // Though less likely primary for speak page
           modalitiesConfig = ["text"];
           transcriptionConfig = null;
+        } else if (data?.isIntroSequence && sessionStatus === "CONNECTED") {
+          // If intro is playing (signaled by isIntroSequence), agent is speaking its intro, not listening for user speech.
+          // This overrides other turn detection settings for the intro period.
+          console.log(`[SpeakPage] SESSION_UPDATE_LOGIC: data.isIntroSequence is true for ${currentAgentConfig.name}. Setting turnDetectionConfig to null.`);
+          turnDetectionConfig = null;
         } else if (currentAudioInputMode === "conversation") {
           turnDetectionConfig = {
             type: "server_vad", threshold: 0.5, prefix_padding_ms: 300,
@@ -186,8 +210,9 @@ function KatoSpeakPageContent() {
           },
         };
         eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, { eventObj: sessionUpdateEvent, eventNameSuffix: "session.update (speak page)" });
-        if (data?.shouldTriggerResponse) {
+        if (data?.shouldTriggerResponse && !data?.isIntroSequence) { // Ensure "Hi" is not sent during an intro sequence
             const id = uuidv4().slice(0, 32);
+            console.log(`[SpeakPage] INTRO DEBUG: Sending simulated 'Hi' for agent: ${currentAgentConfig?.name}. shouldTriggerResponse was true AND isIntroSequence was false.`);
             addTranscriptMessage(id, "user", "Hi", true); // This still goes to transcript context
             eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
                 eventObj: { type: "conversation.item.create", item: { id, type: "message", role: "user", content: [{ type: "input_text", text: "Hi" }] } },
@@ -197,7 +222,7 @@ function KatoSpeakPageContent() {
         }
     };
     return eventBus.on(KatoEvents.SESSION_UPDATE_REQUESTED, performUpdateSession);
-  }, [eventBus, currentAgentConfig, currentAudioInputMode, addTranscriptMessage]);
+  }, [eventBus, currentAgentConfig, currentAudioInputMode, addTranscriptMessage, sessionStatus]); // isIntroAudioPlaying removed, sessionStatus kept for connection check
 
   const cancelAssistantSpeechLogic = useCallback(() => {
     // Logic to find recent assistant message from transcriptItems is problematic if transcriptItems isn't used/passed
@@ -259,8 +284,12 @@ function KatoSpeakPageContent() {
 
   // handleSendTextMessage is not for this page's primary UI
   const handleAvatarAgentSelect = useCallback((newAgentName: string) => {
+    if (!playedAgentIntros.has(newAgentName)) {
+      console.log(`[SpeakPage] INTRO_REF_SET (AvatarSelect): Setting introCycleForAgentNameRef to ${newAgentName}`);
+      introCycleForAgentNameRef.current = newAgentName;
+    }
     selectAgent(newAgentName);
-  }, [selectAgent]);
+  }, [selectAgent, playedAgentIntros]);
 
   useEffect(() => {
     return eventBus.on(KatoEvents.USER_INTERRUPTED_ASSISTANT_SPEECH, cancelAssistantSpeechLogic);
@@ -452,11 +481,44 @@ function KatoSpeakPageContent() {
   useEffect(() => { // Initial Session Update
     if (sessionStatus === "CONNECTED" && currentAgentConfig && !hasDoneInitialAgentSetupRef.current) {
       addTranscriptBreadcrumb(`Agent ${currentAgentConfig.name} ready (Speak Page).`);
-      eventBus.emit(KatoEvents.SESSION_UPDATE_REQUESTED, { shouldTriggerResponse: !isInitialAgentConnectionRef.current });
-      if (isInitialAgentConnectionRef.current) isInitialAgentConnectionRef.current = false;
+      
+      let decidedThisUpdateIsForIntro = false;
+      if (introCycleForAgentNameRef.current === currentAgentConfig.name) {
+        console.log(`[SpeakPage] DECISION_LOG_REF_MATCH: introCycleForAgentNameRef (${introCycleForAgentNameRef.current}) matches ${currentAgentConfig.name}. This is an intro cycle.`);
+        decidedThisUpdateIsForIntro = true;
+        introCycleForAgentNameRef.current = null; // Consume the flag for this agent's cycle
+      } else if (isIntroAudioPlaying) {
+        // Fallback: if isIntroAudioPlaying is true, it's also an intro context.
+        // This might happen if the ref was cleared or not set, but audio started.
+        console.log(`[SpeakPage] DECISION_LOG_REF_NO_MATCH_BUT_AUDIO_PLAYING: introCycleForAgentNameRef (${introCycleForAgentNameRef.current}) did not match ${currentAgentConfig.name}, but isIntroAudioPlaying is true.`);
+        decidedThisUpdateIsForIntro = true;
+      } else {
+        // Last resort check based on playedAgentIntros if other signals missed.
+        // This can be problematic due to the timing of playedAgentIntros updates.
+        const isNewAgentAccordingToPlayedSet = !playedAgentIntros.has(currentAgentConfig.name);
+        if (isNewAgentAccordingToPlayedSet) {
+          console.log(`[SpeakPage] DECISION_LOG_REF_AND_AUDIO_MISSED_BUT_NEW_IN_SET: Considered intro for ${currentAgentConfig.name} based on playedAgentIntros.`);
+          decidedThisUpdateIsForIntro = true;
+        }
+      }
+      
+      const triggerAutomaticResponse = 
+        !isInitialAgentConnectionRef.current && 
+        !decidedThisUpdateIsForIntro;
+
+      console.log(`[SpeakPage] DECISION_LOG: Agent: ${currentAgentConfig.name}, isInitial: ${isInitialAgentConnectionRef.current}, isIntroAudioPlayingVisual: ${isIntroAudioPlaying}, decidedThisUpdateIsForIntro: ${decidedThisUpdateIsForIntro} => triggerHiFlag: ${triggerAutomaticResponse}`);
+
+      eventBus.emit(KatoEvents.SESSION_UPDATE_REQUESTED, { 
+        shouldTriggerResponse: triggerAutomaticResponse,
+        isIntroSequence: decidedThisUpdateIsForIntro, 
+      });
+      
+      if (isInitialAgentConnectionRef.current) {
+        isInitialAgentConnectionRef.current = false;
+      }
       hasDoneInitialAgentSetupRef.current = true;
     }
-  }, [sessionStatus, currentAgentConfig, eventBus, addTranscriptBreadcrumb]);
+  }, [sessionStatus, currentAgentConfig, eventBus, addTranscriptBreadcrumb, playedAgentIntros, isIntroAudioPlaying]);
 
   useEffect(() => { // Audio Settings Change
     const handleAudioSettingsChange = () => {
@@ -475,16 +537,50 @@ function KatoSpeakPageContent() {
     return () => sub();
   }, [eventBus]);
 
+  // Effect for AGENT_INTRO_STARTED and AGENT_INTRO_FINISHED events
+  useEffect(() => {
+    if (currentAgentConfig) {
+        if (isIntroAudioPlaying && !prevIntroAudioPlayingRef.current) {
+            console.log(`[SpeakPage] INTRO_LIFECYCLE_LOG: Event ${AGENT_INTRO_STARTED_EVENT} for ${currentAgentConfig.name}`);
+            eventBus.emit(AGENT_INTRO_STARTED_EVENT, { agentName: currentAgentConfig.name });
+        } else if (!isIntroAudioPlaying && prevIntroAudioPlayingRef.current) {
+            console.log(`[SpeakPage] INTRO_LIFECYCLE_LOG: Intro potentially finished for ${currentAgentConfig.name}. IsIntroPlaying is now false. Prev was true.`);
+            console.log(`[SpeakPage] INTRO_LIFECYCLE_LOG: PRE-SET playedAgentIntros for ${currentAgentConfig.name}: ${JSON.stringify(Array.from(playedAgentIntros))}`);
+            eventBus.emit(AGENT_INTRO_FINISHED_EVENT, { agentName: currentAgentConfig.name });
+            // Add to playedAgentIntros only after it has finished playing
+            if (!playedAgentIntros.has(currentAgentConfig.name)) {
+              setPlayedAgentIntros(prev => {
+                  const newSet = new Set(prev);
+                  newSet.add(currentAgentConfig.name);
+                  console.log(`[SpeakPage] INTRO_LIFECYCLE_LOG: POST-SET called for ${currentAgentConfig.name}. New set will be: ${JSON.stringify(Array.from(newSet))}`);
+                  return newSet;
+              });
+            } else {
+              console.log(`[SpeakPage] INTRO_LIFECYCLE_LOG: Intro finished for ${currentAgentConfig.name}, but already in playedAgentIntros. No setPlayedAgentIntros call needed.`);
+            }
+        }
+    }
+    prevIntroAudioPlayingRef.current = isIntroAudioPlaying;
+  }, [isIntroAudioPlaying, currentAgentConfig, eventBus, playedAgentIntros]);
+
   const isDisconnectedOrErrorState = sessionStatus === "DISCONNECTED" || sessionStatus === "ERROR";
 
   const handleStartWithPatient = () => {
     introButtonClickedRef.current = true;
+    if (!playedAgentIntros.has("mrKato")) {
+      console.log(`[SpeakPage] INTRO_REF_SET (StartPatient): Setting introCycleForAgentNameRef to mrKato`);
+      introCycleForAgentNameRef.current = "mrKato";
+    }
     eventBus.emit(KatoEvents.USER_SELECTED_AGENT, { agentName: "mrKato" });
     setShowIntroScreen(false);
   };
 
   const handleStartWithPreceptor = () => {
     introButtonClickedRef.current = true;
+    if (!playedAgentIntros.has("preceptor")) {
+      console.log(`[SpeakPage] INTRO_REF_SET (StartPreceptor): Setting introCycleForAgentNameRef to preceptor`);
+      introCycleForAgentNameRef.current = "preceptor";
+    }
     eventBus.emit(KatoEvents.USER_SELECTED_AGENT, { agentName: "preceptor" });
     setShowIntroScreen(false);
   };
@@ -609,15 +705,25 @@ function KatoSpeakPageContent() {
           </div>
           <div className="absolute bottom-6 left-6 flex flex-col space-y-4">
             {currentAgentConfig?.name !== patientAgent?.name && patientAgent && (
-              <div onClick={() => handleAvatarAgentSelect(patientAgent.name)} title={`Switch to ${patientAgent.publicDescription}`}
-                className="flex flex-col items-center text-center cursor-pointer p-3 rounded-xl transition-all hover:bg-green-100 shadow-md hover:shadow-lg">
+              <div 
+                onClick={() => !isIntroAudioPlaying && handleAvatarAgentSelect(patientAgent.name)} 
+                title={isIntroAudioPlaying ? "Agent intro playing..." : `Switch to ${patientAgent.publicDescription}`}
+                className={`flex flex-col items-center text-center p-3 rounded-xl transition-all shadow-md hover:shadow-lg ${
+                  isIntroAudioPlaying ? 'opacity-50 cursor-not-allowed bg-gray-100' : 'cursor-pointer hover:bg-green-100'
+                }`}
+              >
                 <div className="w-20 h-20 border-2 border-green-400 bg-green-50 rounded-full flex items-center justify-center text-green-600 text-xl font-semibold">Patient</div>
                 <span className="mt-1 text-xs font-medium text-gray-600">{patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name}</span>
               </div>
             )}
             {currentAgentConfig?.name !== preceptorAgent?.name && preceptorAgent && (
-               <div onClick={() => handleAvatarAgentSelect(preceptorAgent.name)} title={`Switch to ${preceptorAgent.publicDescription}`}
-                className="flex flex-col items-center text-center cursor-pointer p-3 rounded-xl transition-all hover:bg-purple-100 shadow-md hover:shadow-lg">
+               <div 
+                onClick={() => !isIntroAudioPlaying && handleAvatarAgentSelect(preceptorAgent.name)} 
+                title={isIntroAudioPlaying ? "Agent intro playing..." : `Switch to ${preceptorAgent.publicDescription}`}
+                className={`flex flex-col items-center text-center p-3 rounded-xl transition-all shadow-md hover:shadow-lg ${
+                  isIntroAudioPlaying ? 'opacity-50 cursor-not-allowed bg-gray-100' : 'cursor-pointer hover:bg-purple-100'
+                }`}
+               >
                 <div className="w-20 h-20 border-2 border-purple-400 bg-purple-50 rounded-full flex items-center justify-center text-purple-600 text-xl font-semibold"><span className="text-xs">Preceptor</span></div>
                 <span className="mt-1 text-xs font-medium text-gray-600">&nbsp;</span>
               </div>
