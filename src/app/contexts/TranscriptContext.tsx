@@ -11,6 +11,7 @@ type TranscriptContextValue = {
   addTranscriptBreadcrumb: (title: string, data?: Record<string, any>) => void;
   toggleTranscriptItemExpand: (itemId: string) => void;
   updateTranscriptItem: (itemId: string, updatedProperties: Partial<TranscriptItem>) => void;
+  clearTranscriptItems: () => void;
 };
 
 const TranscriptContext = createContext<TranscriptContextValue | undefined>(undefined);
@@ -97,6 +98,10 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
     );
   }, [setTranscriptItems]);
 
+  const clearTranscriptItems = useCallback(() => {
+    setTranscriptItems([]);
+  }, [setTranscriptItems]);
+
   const contextValue = React.useMemo(() => ({
     transcriptItems,
     addTranscriptMessage,
@@ -104,6 +109,7 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
     addTranscriptBreadcrumb,
     toggleTranscriptItemExpand,
     updateTranscriptItem,
+    clearTranscriptItems,
   }), [
     transcriptItems,
     addTranscriptMessage,
@@ -111,6 +117,7 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
     addTranscriptBreadcrumb,
     toggleTranscriptItemExpand,
     updateTranscriptItem,
+    clearTranscriptItems,
   ]);
 
   return (

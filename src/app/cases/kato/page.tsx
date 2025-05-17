@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { motion, AnimatePresence } from "framer-motion";
 import { LuWifiOff, LuLoader } from "react-icons/lu";
+import { useRouter } from "next/navigation"; // Added for navigation
 
 import Image from "next/image";
 
@@ -39,6 +40,7 @@ function KatoPageContent() {
   const { transcriptItems, addTranscriptMessage, addTranscriptBreadcrumb } =
     useTranscript();
   const { logClientEvent, logServerEvent } = useEvent();
+  const router = useRouter(); // Added router instance
 
   const [selectedAgentName, setSelectedAgentName] = useState<string>("");
   const [selectedAgentConfigSet, setSelectedAgentConfigSet] = useState<
@@ -583,7 +585,7 @@ function KatoPageContent() {
         console.warn("Connect attempt without selected agent.");
       }
     }
-  }, [sessionStatus, disconnectFromRealtime, connectToRealtime, selectedAgentName, addTranscriptBreadcrumb, playIntroductoryMessageThenConnect]);
+  }, [sessionStatus, disconnectFromRealtime, playIntroductoryMessageThenConnect, selectedAgentName, addTranscriptBreadcrumb]);
 
   const handleAvatarAgentSelect = useCallback((newAgentName: string) => {
     if (newAgentName === selectedAgentName && sessionStatus === "CONNECTED") {
@@ -739,6 +741,15 @@ function KatoPageContent() {
       window.removeEventListener('resize', calculatePositions);
     };
   }, [selectedAgentName, selectedAgentConfigSet, patientAgent, preceptorAgent]);
+
+  const handleCreateDDx = useCallback(() => {
+    if (sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING") {
+      addTranscriptBreadcrumb("Disconnecting session before navigating to DDx page...");
+      disconnectFromRealtime();
+      setManualDisconnect(true); // Prevent auto-reconnect on the main page
+    }
+    router.push('/cases/kato/ddx'); 
+  }, [router, sessionStatus, disconnectFromRealtime, addTranscriptBreadcrumb, setManualDisconnect]);
 
   return (
     <div className="text-base flex flex-col h-screen bg-gray-100 text-gray-800 relative">
@@ -1065,44 +1076,57 @@ function KatoPageContent() {
       </div>
 
       {/* Simplified Bottom Toolbar: Connection Toggle */}
-      <div className="p-3 border-t bg-gray-50 flex justify-center items-center space-x-4">
-        <button
-          onClick={onToggleConnection}
-          className={`px-8 py-3 rounded-lg text-white font-semibold text-lg shadow-md transition-colors
-                      ${sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING" 
-                        ? "bg-red-500 hover:bg-red-600 focus:ring-red-300" 
-                        : "bg-green-500 hover:bg-green-600 focus:ring-green-300"}
-                      focus:outline-none focus:ring-2 focus:ring-opacity-75`}
-          disabled={!selectedAgentName && !(sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING")}
-        >
-          {sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING"
-            ? "Disconnect"
-            : "Connect"}
-        </button>
-        {uiMode === 'avatar' && (
-            <button
-              onClick={() => {
-                setUiMode('text');
-                setCurrentAudioInputMode("ptt");
-                setIsPTTActive(true);
-              }}
-              className="px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-colors"
-            >
-              Write
-            </button>
-        )}
-        {uiMode === 'text' && (
-            <button
-              onClick={() => {
-                setUiMode('avatar');
-                setCurrentAudioInputMode("conversation");
-                setIsPTTActive(false);
-              }}
-              className="px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-colors"
-            >
-              Speak
-            </button>
-        )}
+      <div className="p-3 border-t bg-gray-50 flex justify-between items-center space-x-4">
+        <div>
+          {/* Placeholder for potential left-aligned future buttons if needed */}
+        </div>
+        <div className="flex items-center space-x-4"> {/* Centered group */}
+          <button
+            onClick={onToggleConnection}
+            className={`px-8 py-3 rounded-lg text-white font-semibold text-lg shadow-md transition-colors
+                        ${sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING" 
+                          ? "bg-red-500 hover:bg-red-600 focus:ring-red-300" 
+                          : "bg-green-500 hover:bg-green-600 focus:ring-green-300"}
+                        focus:outline-none focus:ring-2 focus:ring-opacity-75`}
+            disabled={!selectedAgentName && !(sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING")}
+          >
+            {sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING"
+              ? "Disconnect"
+              : "Connect"}
+          </button>
+          {uiMode === 'avatar' && (
+              <button
+                onClick={() => {
+                  setUiMode('text');
+                  setCurrentAudioInputMode("ptt");
+                  setIsPTTActive(true);
+                }}
+                className="px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-colors"
+              >
+                Write
+              </button>
+          )}
+          {uiMode === 'text' && (
+              <button
+                onClick={() => {
+                  setUiMode('avatar');
+                  setCurrentAudioInputMode("conversation");
+                  setIsPTTActive(false);
+                }}
+                className="px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-colors"
+              >
+                Speak
+              </button>
+          )}
+        </div>
+        <div> {/* Right-aligned group */}
+          <button
+            onClick={handleCreateDDx}
+            className="px-6 py-3 bg-purple-500 hover:bg-purple-600 text-white font-semibold rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-opacity-75 transition-colors"
+          >
+            Create a DDx
+          </button>
+        </div>
         {/* Optional: Display session status explicitly if header is not enough */}
         {/* <span className="text-sm text-gray-600">Status: {sessionStatus}</span> */}
       </div>
