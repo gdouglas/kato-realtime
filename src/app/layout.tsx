@@ -1,6 +1,5 @@
 import { Metadata } from 'next';
 import './globals.css';
-import TestRunner from './components/TestRunner';
 
 export const metadata: Metadata = {
   title: "Realtime API Agents",
@@ -16,7 +15,6 @@ export default function RootLayout({
     <html lang="en">
       <body>
         {children}
-        {/* <TestRunner /> */}
       </body>
     </html>
   );

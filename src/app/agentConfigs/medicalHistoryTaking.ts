@@ -44,6 +44,12 @@ meds: metformin, gliclazide MR, atenolol, ASA 81, atorvastatin
 social: smoker 40 years (quitting), social alcohol  
 lives with wife, retired postal worker • ROS otherwise negative
 `,
+  introAudio: {
+    text: "Oh, hi there. I'm looking for a doctor, am I in the right place?",
+    instructions: "Voice Affect: Calm, slightly anxious, slightly curious",
+    voice: "ash", 
+    model: "gpt-4o-mini-tts" 
+  },
   tools: [],
   voice: "ash"
 };
@@ -92,7 +98,7 @@ const medicalPreceptor: AgentConfig = {
   publicDescription: "Medical instructor guiding students through ophthalmology history-taking and differential diagnosis.",
   instructions: `You are a virtual preceptor for students at the University of British Columbia Faculty of Medicine. Respond with short concise statements. Answer questions as a medical preceptor training students to take a patient history. If the student asks to talk with the patient thell them that they can click on the Patient button to transfer to the patient.`,
   introAudio: {
-    text: "Hi, the patient is waiting for you. I'm here to give feedback or help if you get stuck.",
+    text: "Hi, how can I help you with your patient interview?",
     instructions: "Voice Affect: Calm, composed, and reassuring. Competent and in control, instilling trust.\n\nTone: Sincere, empathetic.\n\nPacing: Slower during the intro to allow for clarity and processing. Faster when saying what they are here for.\n\nEmotions: Calm reassurance, empathy, and gratitude.\n\nPronunciation: Clear, precise: Ensures clarity, especially with key details.\n\nPauses: Slight after saying hi.",
     voice: "shimmer", // Defaulting to shimmer, can be changed
     model: "gpt-4o-mini-tts" // Ensure this model supports 'instructions'
