@@ -3,7 +3,8 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 // Removed useSearchParams as agentConfig is fixed
 import { v4 as uuidv4 } from "uuid";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
+import { LuWifiOff, LuLoader } from "react-icons/lu";
 
 import Image from "next/image";
 
@@ -682,7 +683,7 @@ function KatoPageContent() {
     const calculatePositions = () => {
       const parentEl = linePositioningParentRef.current;
       const userCircleEl = userAvatarCircleRef.current;
-      const lineEl = indicatorLineRef.current;
+      const lineEl = indicatorLineRef.current; // Ref for the line itself
       let activeAgentCircleEl: HTMLDivElement | null = null;
 
       if (selectedAgentName === patientAgent?.name) {
@@ -697,28 +698,47 @@ function KatoPageContent() {
         const agentCircleRect = activeAgentCircleEl.getBoundingClientRect();
         const actualIndicatorWidth = lineEl.getBoundingClientRect().width;
 
-        // Calculate center of user avatar circle relative to the line's positioning parent
+        // Ensure all rects have valid dimensions before calculating
+        if (
+          parentRect.width === 0 || parentRect.height === 0 ||
+          userCircleRect.width === 0 || userCircleRect.height === 0 ||
+          agentCircleRect.width === 0 || agentCircleRect.height === 0 ||
+          actualIndicatorWidth === 0
+        ) {
+          // console.warn("Skipping indicator calculation: Zero dimension detected for one or more elements.");
+          return; // Skip calculation if elements aren't fully rendered yet
+        }
+
         const userCircleCenterX = (userCircleRect.left - parentRect.left) + (userCircleRect.width / 2);
         const userIndicatorX = userCircleCenterX - (actualIndicatorWidth / 2);
 
-        // Calculate center of active agent avatar circle relative to the line's positioning parent
         const agentCircleCenterX = (agentCircleRect.left - parentRect.left) + (agentCircleRect.width / 2);
         const agentIndicatorX = agentCircleCenterX - (actualIndicatorWidth / 2);
         
+        // Only update if the new values are meaningfully different to prevent infinite loops if not careful
+        // For x positions, even small changes might be valid during resize.
         setIndicatorTargets({ user: userIndicatorX, agent: agentIndicatorX });
       } else {
-        // Fallback or initial state if elements aren't rendered/refs not attached yet
+        // console.warn("Skipping indicator calculation: One or more refs are null.");
       }
     };
 
-    calculatePositions();
+    // Initial calculation might be too early for some browsers/setups.
+    // A small delay or relying on the first resize/agent change might be more robust.
+    // However, the check for zero dimensions above should help.
+    calculatePositions(); 
+    
+    // It might be beneficial to also call calculatePositions after a very short delay 
+    // to catch initial rendering if the above check isn't enough.
+    const timeoutId = setTimeout(calculatePositions, 50); 
+
     window.addEventListener('resize', calculatePositions);
 
     return () => {
+      clearTimeout(timeoutId);
       window.removeEventListener('resize', calculatePositions);
     };
-  }, [selectedAgentName, selectedAgentConfigSet, patientAgent, preceptorAgent]); 
-  // Removed indicatorWidthPx from deps as it's now measured
+  }, [selectedAgentName, selectedAgentConfigSet, patientAgent, preceptorAgent]);
 
   return (
     <div className="text-base flex flex-col h-screen bg-gray-100 text-gray-800 relative">
@@ -735,7 +755,7 @@ function KatoPageContent() {
             className="mr-3"
           /><span className="text-gray-500 font-medium text-lg mr-2 ml-2 h-full border-l border-gray-300">&nbsp;</span>
           <span className="font-bold text-xl">
-            Medical History: Mr. Kato <span className="text-gray-500 font-medium text-lg">Case</span>
+            Mr. Kato
           </span>
         </div>
         <div className="text-sm text-gray-700">
@@ -782,7 +802,7 @@ function KatoPageContent() {
             <div ref={linePositioningParentRef} className="relative flex justify-around w-full items-start mt-8">
               {/* User Avatar */}
               <div className="flex flex-col items-center text-center w-1/3"> 
-                <div ref={userAvatarCircleRef} className={`box-content relative w-48 h-48 border-4 border-blue-500 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 text-3xl font-semibold shadow-lg`}>
+                <div ref={userAvatarCircleRef} className={`box-content relative w-32 h-32 border-4 border-blue-500 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 text-3xl font-semibold shadow-lg`}>
                   <span style={{ position: 'relative', zIndex: 1 }}>You</span>
                   {isPTTUserSpeaking && (
                     <>
@@ -800,12 +820,14 @@ function KatoPageContent() {
                   <>
                     <div 
                       ref={patientAvatarCircleRef} // Ref for patient circle
-                      className={`box-content relative w-32 h-32 border-4 border-green-500 bg-green-100 rounded-full flex items-center justify-center text-green-700 text-3xl font-semibold shadow-lg cursor-default`}
+                      className={`box-content relative w-32 h-32 border-4 border-green-500 bg-green-100 rounded-full flex items-center justify-center text-green-700 font-semibold shadow-lg cursor-default`}
                       title={`${patientAgent.publicDescription} (Active)`}
                     >
-                      Patient
-                    </div>
-                    <span className="mt-2 text-md font-medium text-gray-700">{patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name}</span>
+                       <div className="flex flex-col items-center ">
+                          <span className="text-3xl mt-5">Patient</span>
+                         <div className="mt-1 text-xs font-medium text-gray-700">{patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name}</div>
+                        </div>
+                     </div>
                     {/* REMOVED old patient indicator line */}
                   </>
                 )}
@@ -813,7 +835,7 @@ function KatoPageContent() {
                   <>
                     <div 
                       ref={preceptorAvatarCircleRef} // Ref for preceptor circle
-                      className={`box-content relative w-48 h-48 border-4 border-purple-500 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 text-3xl font-semibold shadow-lg cursor-default`}
+                      className={`box-content relative w-32 h-32 border-4 border-purple-500 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 text-3xl font-semibold shadow-lg cursor-default`}
                       title={`${preceptorAgent.publicDescription} (Active)`}
                     >
                       Preceptor
@@ -822,21 +844,66 @@ function KatoPageContent() {
                 )}
               </div>
               
-              {/* Shared Animated Indicator Line */}
-              <motion.div
-                ref={indicatorLineRef} // Added ref to the indicator line
-                className="absolute bottom-[-20px] h-1 w-24" // w-24 provides an initial estimate, actual width is measured
-                style={{ left: 0 }} // x translation will be relative to this parent's left edge
-                variants={{
-                  user: { x: indicatorTargets.user, opacity: 1, backgroundColor: "rgb(59 130 246)" }, 
-                  patient: { x: indicatorTargets.agent, opacity: 1, backgroundColor: "rgb(34 197 94)" }, 
-                  preceptor: { x: indicatorTargets.agent, opacity: 1, backgroundColor: "rgb(168 85 247)" }, 
-                  none: { opacity: 0 }
-                }}
-                animate={activeSpeakerTurn}
-                initial="none"
-                transition={{ duration: 0.4, ease: "easeInOut" }}
-              />
+              {/* Container for Status Indicators (Spinner, Disconnected Icon, or Turn Line) */}
+              <div className="absolute inset-x-0 bottom-[-32px] h-8"> {/* Adjusted bottom to -32px */}
+                <AnimatePresence mode="wait">
+                  {sessionStatus === "CONNECTING" && (
+                    <motion.div
+                      key="spinner"
+                      initial={{ opacity: 0, scale: 0.7 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.7 }}
+                      transition={{ duration: 0.2 }}
+                      className="flex items-center justify-center h-full w-full"
+                    >
+                      <LuLoader className="animate-spin text-gray-500" size={24} />
+                    </motion.div>
+                  )}
+
+                  {(sessionStatus === "DISCONNECTED" || sessionStatus === "ERROR") && (
+                    <motion.div
+                      key="disconnected-icon"
+                      initial={{ opacity: 0, scale: 0.7 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.7 }}
+                      transition={{ duration: 0.2 }}
+                      className="flex items-center justify-center h-full w-full"
+                    >
+                      <LuWifiOff size={24} className={sessionStatus === "ERROR" ? "text-red-500" : "text-gray-500"} />
+                    </motion.div>
+                  )}
+
+                  {sessionStatus === "CONNECTED" && (
+                    // This outer motion.div is for the presence/absence animation of the line system
+                    <motion.div
+                      key="line-indicator-system"
+                      className="relative w-full h-full" // Takes full space of its parent (the h-8 div)
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {/* This inner motion.div is the actual visible, moving line */}
+                      {/* It is positioned absolutely within its parent (line-indicator-system) */}
+                      {/* Its x-values (indicatorTargets) are relative to linePositioningParentRef */}
+                      <motion.div 
+                        ref={indicatorLineRef} // Ref is on the element whose width we measure and that moves
+                        className="absolute h-1 w-24 top-1/2 -translate-y-1/2" // Vertically centered in parent, width w-24
+                        // style={{ left: 0 }} // Not needed here if x is an absolute position from parent calculation
+                        variants={{
+                          user: { x: indicatorTargets.user, opacity: 1, backgroundColor: "rgb(59 130 246)" }, 
+                          patient: { x: indicatorTargets.agent, opacity: 1, backgroundColor: "rgb(34 197 94)" }, 
+                          preceptor: { x: indicatorTargets.agent, opacity: 1, backgroundColor: "rgb(168 85 247)" }, 
+                          none: { opacity: 0 }
+                        }}
+                        animate={activeSpeakerTurn} 
+                        initial="none" 
+                        transition={{ duration: 0.4, ease: "easeInOut" }}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
 
             {/* PTT Button (centralized below active conversation) */}
