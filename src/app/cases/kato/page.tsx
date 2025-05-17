@@ -835,10 +835,10 @@ function KatoPageContent() {
                   <>
                     <div 
                       ref={preceptorAvatarCircleRef} // Ref for preceptor circle
-                      className={`box-content relative w-32 h-32 border-4 border-purple-500 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 text-3xl font-semibold shadow-lg cursor-default`}
+                      className={`box-content relative w-32 h-32 border-4 border-purple-500 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 font-semibold shadow-lg cursor-default`}
                       title={`${preceptorAgent.publicDescription} (Active)`}
                     >
-                      Preceptor
+                      <span className="text-2xl">Preceptor</span>
                     </div>
                   </>
                 )}
@@ -974,9 +974,9 @@ function KatoPageContent() {
                   title={`Switch to ${preceptorAgent.publicDescription}`}
                 >
                   <div className={`w-20 h-20 border-2 border-purple-400 bg-purple-50 rounded-full flex items-center justify-center text-purple-600 text-xl font-semibold`}>
-                    Preceptor
+                    <span className="text-xs">Preceptor</span>
                   </div>
-                  <span className="mt-1 text-xs font-medium text-gray-600">Preceptor</span>
+                  <span className="mt-1 text-xs font-medium text-gray-600">&nbsp;</span>
                 </div>
               )}
             </div>
