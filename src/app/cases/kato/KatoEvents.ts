@@ -43,6 +43,11 @@ export const KatoEvents = {
   SERVER_AGENT_RESPONSE_CANCELLED: 'SERVER_AGENT_RESPONSE_CANCELLED',
   SERVER_SESSION_UPDATED_ACK: 'SERVER_SESSION_UPDATED_ACK',
 
+  // Specific VAD and Response Lifecycle events based on OpenAI docs
+  USER_SPEECH_STARTED: 'USER_SPEECH_STARTED', // Server detected user started speaking
+  USER_SPEECH_STOPPED: 'USER_SPEECH_STOPPED',   // Server detected user stopped speaking
+  AGENT_RESPONSE_COMPLETED: 'AGENT_RESPONSE_COMPLETED', // Server indicated response.done
+
   // Client-Side Events (sent to server or for internal client communication)
   SEND_MESSAGE_TO_SERVER: 'SEND_MESSAGE_TO_SERVER', // data: { eventObj: any, eventNameSuffix?: string }
   SESSION_UPDATE_REQUESTED: 'SESSION_UPDATE_REQUESTED', // data?: { shouldTriggerResponse?: boolean }

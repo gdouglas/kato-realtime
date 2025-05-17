@@ -34,7 +34,6 @@ export function useKatoRTC({
   const [manualDisconnect, setManualDisconnect] = useState<boolean>(false);
 
   const performConnection = useCallback(async () => {
-    console.log("[PerformConnectionDebug][Hook] Attempting connection. Current status:", sessionStatus);
     if (sessionStatus === "CONNECTING" || sessionStatus === "CONNECTED") {
       console.warn("[PerformConnectionDebug][Hook] Connection attempt aborted, already connecting/connected.");
       return;
@@ -47,9 +46,7 @@ export function useKatoRTC({
 
     try {
       logClientEvent({ url: "/session" }, "fetch_session_token_request");
-      console.log("[PerformConnectionDebug][Hook] Fetching ephemeral key...");
       const tokenResponse = await fetch(`${API_BASE_URL}/api/v1/session`, { method: "POST" });
-      console.log("[PerformConnectionDebug][Hook] Token response status:", tokenResponse.status);
       if (!tokenResponse.ok) {
         const errorText = await tokenResponse.text();
         console.error("[PerformConnectionDebug][Hook] Token fetch failed:", errorText);
@@ -57,35 +54,28 @@ export function useKatoRTC({
       }
       const data = await tokenResponse.json();
       logServerEvent(data, "fetch_session_token_response");
-      console.log("[PerformConnectionDebug][Hook] Token data received:", data);
 
       if (!data.client_secret?.value) {
         console.error("[PerformConnectionDebug][Hook] No client_secret.value in token response.");
         throw new Error("No ephemeral key provided by the server");
       }
       const EPHEMERAL_KEY = data.client_secret.value;
-      console.log("[PerformConnectionDebug][Hook] Ephemeral key obtained. Creating WebRTC connection...");
 
       if (!audioElementRef.current) audioElementRef.current = document.createElement("audio");
       audioElementRef.current.autoplay = isAudioPlaybackEnabled;
 
-      console.log("[PerformConnectionDebug][Hook] Calling createRealtimeConnection...");
       try {
         const { pc, dc } = await createRealtimeConnection(EPHEMERAL_KEY, audioElementRef, urlCodec);
-        console.log("[PerformConnectionDebug][Hook] createRealtimeConnection returned. PC and DC obtained.");
         pcRef.current = pc;
         dcRef.current = dc;
         // setDataChannel(dc); // Not setting state here, dcRef.current is the source of truth
 
-        console.log("[PerformConnectionDebug][Hook] Setting up DataChannel event listeners...");
         dc.onopen = () => {
-          console.log("[PerformConnectionDebug][Hook] DataChannel: onopen fired.");
           logClientEvent({}, "data_channel.open");
           eventBus.emit(KatoEvents.DATA_CHANNEL_STATUS_CHANGED, 'open');
           eventBus.emit(KatoEvents.CONNECTION_ESTABLISHED);
         };
         dc.onclose = () => {
-          console.log("[PerformConnectionDebug][Hook] DataChannel: onclose fired.");
           logClientEvent({}, "data_channel.close");
           eventBus.emit(KatoEvents.DATA_CHANNEL_STATUS_CHANGED, 'closed');
         };
@@ -97,7 +87,6 @@ export function useKatoRTC({
         dc.onmessage = (e: MessageEvent) => {
           handleServerEvent(JSON.parse(e.data));
         };
-        console.log("[PerformConnectionDebug][Hook] WebRTC connection setup initiated, listeners attached.");
       } catch (rtcError: any) {
         console.error("[PerformConnectionDebug][Hook] Error directly from createRealtimeConnection or its immediate aftermath:", rtcError);
         if (rtcError.name === 'NotAllowedError') {
@@ -156,12 +145,10 @@ export function useKatoRTC({
 
   // Effect to subscribe to connect/disconnect requests from the event bus
   useEffect(() => {
-    console.log("[PerformConnectionDebug][Hook] Subscribing USER_REQUESTED_CONNECT handler.");
     const unsubConnect = eventBus.on(KatoEvents.USER_REQUESTED_CONNECT, performConnection);
     const unsubDisconnect = eventBus.on(KatoEvents.USER_REQUESTED_DISCONNECT, performDisconnection);
     
     return () => {
-      console.log("[PerformConnectionDebug][Hook] Unsubscribing USER_REQUESTED_CONNECT/DISCONNECT handlers.");
       unsubConnect();
       unsubDisconnect();
     };
