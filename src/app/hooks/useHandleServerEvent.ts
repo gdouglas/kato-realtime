@@ -164,6 +164,18 @@ export function useHandleServerEvent({
     logServerEvent(serverEvent);
 
     switch (serverEvent.type) {
+      // These cases are now handled by the XState machine emitting events on the eventBus.
+      // The machine emits:
+      // - KatoEvents.SERVER_SESSION_CREATED
+      // - KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED
+      // - KatoEvents.SERVER_TRANSCRIPT_ITEM_CREATED
+      // - KatoEvents.SERVER_USER_TRANSCRIPT_COMPLETED
+      // - KatoEvents.SERVER_ASSISTANT_DELTA_RECEIVED
+      // - KatoEvents.SERVER_ASSISTANT_MESSAGE_COMPLETED
+      // - KatoEvents.SERVER_FUNCTION_CALL_REQUESTED
+      // - KatoEvents.USER_SPEECH_STARTED / KatoEvents.USER_SPEECH_STOPPED
+
+      /* REMOVED: session.created
       case "session.created": {
         if (serverEvent.session?.id) {
           addTranscriptBreadcrumb(
@@ -174,7 +186,9 @@ export function useHandleServerEvent({
         }
         break;
       }
+      */
 
+      /* REMOVED: output_audio_buffer.started / .stopped
       case "output_audio_buffer.started": {
         setIsOutputAudioBufferActive(true);
         break;
@@ -183,7 +197,9 @@ export function useHandleServerEvent({
         setIsOutputAudioBufferActive(false);
         break;
       }
+      */
 
+      /* REMOVED: conversation.item.created
       case "conversation.item.created": {
         let text =
           serverEvent.item?.content?.[0]?.text ||
@@ -205,7 +221,9 @@ export function useHandleServerEvent({
         }
         break;
       }
+      */
 
+      /* REMOVED: conversation.item.input_audio_transcription.completed
       case "conversation.item.input_audio_transcription.completed": {
         const itemId = serverEvent.item_id;
         const finalTranscript =
@@ -217,13 +235,15 @@ export function useHandleServerEvent({
         }
         break;
       }
+      */
 
+      /* REMOVED: response.audio_transcript.delta (partially - processGuardrail remains for now)
       case "response.audio_transcript.delta": {
         const itemId = serverEvent.item_id;
         const deltaText = serverEvent.delta || "";
         if (itemId) {
           // Update the transcript message with the new text.
-          updateTranscriptMessage(itemId, deltaText, true);
+          // updateTranscriptMessage(itemId, deltaText, true); // Now handled by eventBus subscriber
 
           // Accumulate the deltas and run the output guardrail at regular intervals.
           if (!assistantDeltasRef.current[itemId]) {
@@ -240,7 +260,30 @@ export function useHandleServerEvent({
         }
         break;
       }
+      */
+      // Retaining the processGuardrail logic from response.audio_transcript.delta temporarily.
+      // This will be moved to a dedicated subscriber for SERVER_ASSISTANT_DELTA_RECEIVED later.
+      case "response.audio_transcript.delta": {
+        const itemId = serverEvent.item_id;
+        const deltaText = serverEvent.delta || "";
+        if (itemId) {
+           // Accumulate the deltas and run the output guardrail at regular intervals.
+          if (!assistantDeltasRef.current[itemId]) {
+            assistantDeltasRef.current[itemId] = "";
+          }
+          assistantDeltasRef.current[itemId] += deltaText;
+          const newAccumulated = assistantDeltasRef.current[itemId];
+          const wordCount = newAccumulated.trim().split(" ").length;
 
+          // Run guardrail classifier every 5 words.
+          if (wordCount > 0 && wordCount % 5 === 0) {
+            processGuardrail(itemId, newAccumulated);
+          }
+        }
+        break;
+      }
+
+      /* REMOVED: response.done (partially - handleFunctionCall remains if not triggered by machine event yet)
       case "response.done": {
         if (serverEvent.response?.output) {
           serverEvent.response.output.forEach((outputItem) => {
@@ -249,36 +292,110 @@ export function useHandleServerEvent({
               outputItem.name &&
               outputItem.arguments
             ) {
-              handleFunctionCall({
-                name: outputItem.name,
-                call_id: outputItem.call_id,
-                arguments: outputItem.arguments,
-              });
-            }
-            if (
+              // handleFunctionCall is called if SERVER_FUNCTION_CALL_REQUESTED is not yet handled by a dedicated service
+              // For now, this direct call path might still be active if the new event isn't consumed for function calls.
+              // Ultimately, this direct call should be removed.
+              // handleFunctionCall({
+              //   name: outputItem.name,
+              //   call_id: outputItem.call_id,
+              //   arguments: outputItem.arguments,
+              // });
+            } else if (
               outputItem.type === "message" &&
-              outputItem.role === "assistant"
+              outputItem.role === "assistant" &&
+              outputItem.content?.[0]?.type === "text"
             ) {
-              const itemId = outputItem.id;
-              const text = outputItem.content[0].transcript;
-              // Final guardrail for this message
-              processGuardrail(itemId, text);
+              // const itemId = outputItem.id;
+              // const textContent = outputItem.content[0].text;
+              // if (itemId && textContent) {
+                // updateTranscriptMessage(itemId, textContent, false); // Now handled by eventBus subscriber
+                // processGuardrail(itemId, textContent); // Run guardrail on full message completion
+              // }
             }
           });
         }
+        // Final guardrail check on accumulated deltas if any
+        Object.keys(assistantDeltasRef.current).forEach((itemId) => {
+          const fullText = assistantDeltasRef.current[itemId];
+          if (fullText) {
+            processGuardrail(itemId, fullText);
+          }
+          delete assistantDeltasRef.current[itemId]; // Clear after processing
+        });
         break;
       }
-
-      case "response.output_item.done": {
-        const itemId = serverEvent.item?.id;
-        if (itemId) {
-          updateTranscriptItem(itemId, { status: "DONE" });
+      */
+      // Retaining parts of response.done temporarily for final guardrail and clearing deltas.
+      // This will be addressed when guardrail and function call handling are fully moved.
+      case "response.done": {
+         if (serverEvent.response?.output) {
+          serverEvent.response.output.forEach((outputItem) => {
+            if (
+              outputItem.type === "message" &&
+              outputItem.role === "assistant" &&
+              outputItem.content?.[0]?.type === "text"
+            ) {
+              const itemId = outputItem.id;
+              const textContent = outputItem.content[0].text;
+              if (itemId && textContent) {
+                 processGuardrail(itemId, textContent); // Run guardrail on full message completion
+              }
+            }
+          });
         }
+        // Final guardrail check on accumulated deltas if any
+        Object.keys(assistantDeltasRef.current).forEach((itemId) => {
+          const fullText = assistantDeltasRef.current[itemId];
+          if (fullText) {
+            processGuardrail(itemId, fullText);
+          }
+          delete assistantDeltasRef.current[itemId]; // Clear after processing
+        });
+        break;
+      }
+      
+      /* REMOVED: response.output_item.done
+      case "response.output_item.done": {
+        const item = serverEvent.item;
+        if (item?.type === "message" && item.role === "assistant") {
+          const textContent =
+            item.content?.[0]?.type === "text"
+              ? item.content[0].text
+              : item.content?.[0]?.type === "audio"
+              ? item.content[0].transcript
+              : null;
+          if (item.id && textContent) {
+            // updateTranscriptMessage(item.id, textContent, false); // Now handled by eventBus subscriber
+            // processGuardrail(item.id, textContent); // Run guardrail on full message completion
+          }
+        } else if (item?.type === "function_call_output") {
+          // Nothing to do here from client perspective for the output item itself being done.
+          // We care about the function call *request* and then sending our *result*.
+        }
+        break;
+      }
+      */
 
+      // This case is for LOCAL function call simulation if RTC is not connected (from App.tsx sendMessage)
+      // It should eventually be replaced by a system where tools are invoked via events regardless of RTC state.
+      case "function.call": {
+        // Assuming this specific event structure based on its creation in App.tsx sendMessage
+        const localFuncCallEvent = serverEvent as {
+          type: "function.call";
+          item_id: string; // item_id was included in App.tsx usage
+          function: { name: string; call_id?: string; arguments: string };
+        };
+        if (localFuncCallEvent.function) {
+          handleFunctionCall(localFuncCallEvent.function);
+        }
         break;
       }
 
       default:
+        console.warn(
+          `[useHandleServerEvent] Unhandled server event type: ${serverEvent.type}`,
+          serverEvent
+        );
         break;
     }
   };

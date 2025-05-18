@@ -42,6 +42,13 @@ export const KatoEvents = {
   SERVER_OUTPUT_AUDIO_ENDED: 'SERVER_OUTPUT_AUDIO_ENDED',
   SERVER_AGENT_RESPONSE_CANCELLED: 'SERVER_AGENT_RESPONSE_CANCELLED',
   SERVER_SESSION_UPDATED_ACK: 'SERVER_SESSION_UPDATED_ACK',
+  SERVER_SESSION_CREATED: 'SERVER_SESSION_CREATED', // data: { sessionId: string }
+  SERVER_TRANSCRIPT_ITEM_CREATED: 'SERVER_TRANSCRIPT_ITEM_CREATED', // data: { itemId: string, role: string, text: string }
+  SERVER_USER_TRANSCRIPT_COMPLETED: 'SERVER_USER_TRANSCRIPT_COMPLETED', // data: { itemId: string, transcript: string }
+  SERVER_ASSISTANT_DELTA_RECEIVED: 'SERVER_ASSISTANT_DELTA_RECEIVED', // data: { itemId: string, deltaText: string }
+  SERVER_ASSISTANT_MESSAGE_COMPLETED: 'SERVER_ASSISTANT_MESSAGE_COMPLETED', // data: { itemId: string, fullText: string }
+  SERVER_FUNCTION_CALL_REQUESTED: 'SERVER_FUNCTION_CALL_REQUESTED', // data: { callId?: string, functionName: string, argsString: string }
+  SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE: 'SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE', // data: { itemId: string, status: string, finalText?: string }
 
   // Specific VAD and Response Lifecycle events based on OpenAI docs
   USER_SPEECH_STARTED: 'USER_SPEECH_STARTED', // Server detected user started speaking

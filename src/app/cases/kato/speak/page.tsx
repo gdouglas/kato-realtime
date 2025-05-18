@@ -53,7 +53,6 @@ function KatoSpeakPageContent() {
     currentAgentConfig,
     isAudioPlaybackEnabled,
     error: lifecycleError,
-    lastServerMessage,
     logServerEvent: contextLogServerEvent,
     addTranscriptBreadcrumb: contextAddTranscriptBreadcrumb,
     eventBus: contextEventBus,
@@ -143,8 +142,8 @@ function KatoSpeakPageContent() {
   }, [selectedAgentName]);
 
   useEffect(() => {
-    const handleAgentChangedPageLogic = (data?: { agentName?: string }) => { 
-      console.log(`[SpeakPage] Agent changed to: ${data?.agentName}`);
+    const handleAgentChangedPageLogic = (data?: { newAgentName?: string; agentConfig?: AgentConfig }) => { 
+      console.log(`[SpeakPage] Agent changed via EventBus to: ${data?.newAgentName}`);
       hasDoneInitialAgentSetupRef.current = false;
     };
     const subChange = eventBus.on(KatoEvents.CURRENT_AGENT_CHANGED, handleAgentChangedPageLogic);
@@ -173,6 +172,8 @@ function KatoSpeakPageContent() {
     }) => {
         if (!currentAgentConfig) return;
         
+        console.log(`[SpeakPage] performUpdateSession called. isIntroSequence: ${data?.isIntroSequence}, currentAudioInputMode: ${currentAudioInputMode}`);
+
         eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
             eventObj: { type: "input_audio_buffer.clear" },
             eventNameSuffix: "clear audio buffer on session update (speak page)"
@@ -186,12 +187,14 @@ function KatoSpeakPageContent() {
           modalitiesConfig = ["text"];
           transcriptionConfig = null;
         } else if (data?.isIntroSequence && sessionStatus === "CONNECTED") {
-          console.log(`[SpeakPage] SESSION_UPDATE_LOGIC: data.isIntroSequence is true for ${currentAgentConfig.name}. Setting turnDetectionConfig to null.`);
+          console.log(`[SpeakPage] SESSION_UPDATE_LOGIC (performUpdateSession): data.isIntroSequence is true for ${currentAgentConfig.name}. Setting turnDetectionConfig to null.`);
           turnDetectionConfig = null;
         } else if (currentAudioInputMode === "conversation") {
+          console.log(`[SpeakPage] SESSION_UPDATE_LOGIC (performUpdateSession): currentAudioInputMode is conversation, setting VAD config.`);
           turnDetectionConfig = {
             type: "server_vad", threshold: 0.5, prefix_padding_ms: 300,
-            silence_duration_ms: 200, create_response: true,
+            silence_duration_ms: 2000, // default was 200, trying 2000
+            create_response: true,
           };
         }
 
@@ -206,6 +209,7 @@ function KatoSpeakPageContent() {
             tools: currentAgentConfig.tools || [],
           },
         };
+        console.log(`[SpeakPage] performUpdateSession: Emitting session.update with turn_detection:`, turnDetectionConfig);
         eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, { eventObj: sessionUpdateEvent, eventNameSuffix: "session.update (speak page)" });
         
         if (data?.shouldTriggerResponse && !data?.isIntroSequence) {
@@ -392,6 +396,7 @@ function KatoSpeakPageContent() {
 
   useEffect(() => {
     let newTurn: 'user' | 'patient' | 'preceptor' | 'none' = 'none';
+
     if (isIntroAudioPlaying) {
       newTurn = currentAgentConfig?.name === patientAgent?.name ? "patient" :
                 (currentAgentConfig?.name === preceptorAgent?.name ? "preceptor" : "none");
@@ -401,7 +406,15 @@ function KatoSpeakPageContent() {
     } else if (isUserActuallySpeaking) {
       newTurn = "user";
     } else {
-      newTurn = "user"; 
+      if (sessionStatus === "CONNECTED") {
+        newTurn = "user";
+      } else {
+        newTurn = "none";
+      }
+    }
+    
+    if (activeSpeakerTurn !== newTurn) {
+        console.log(`[ActiveSpeakerTurnDEBUG] Setting activeSpeakerTurn from '${activeSpeakerTurn}' to: '${newTurn}' (Inputs: introPlaying=${isIntroAudioPlaying}, outputActive=${isOutputAudioBufferActive}, userSpeaking=${isUserActuallySpeaking}, session=${sessionStatus}, currentAgent=${currentAgentConfig?.name})`);
     }
     setActiveSpeakerTurn(newTurn);
   }, [
@@ -410,7 +423,8 @@ function KatoSpeakPageContent() {
     isUserActuallySpeaking, 
     currentAgentConfig, 
     patientAgent, 
-    preceptorAgent
+    preceptorAgent,
+    sessionStatus,
   ]);
 
   useEffect(() => {
@@ -441,29 +455,38 @@ function KatoSpeakPageContent() {
     if (sessionStatus === "CONNECTED" && currentAgentConfig && !hasDoneInitialAgentSetupRef.current) {
       addTranscriptBreadcrumb(`Agent ${currentAgentConfig.name} ready (Speak Page).`);
       
-      // Check if this agent's intro has already been played previously from the state machine
-      const hasIntroBeenPlayedBefore = agentLifecycle.state.context.playedAgentIntros.has(currentAgentConfig.name);
-      const isCurrentlyAnIntroSequence = isIntroAudioPlaying;
-      
-      // Only trigger automatic response if:
-      // 1. No intro is currently playing AND
-      // 2. This agent's intro has already been played before (returning user/agent switch)
-      const shouldTriggerAutomaticResponse = !isCurrentlyAnIntroSequence && hasIntroBeenPlayedBefore;
+      const currentAgentName = currentAgentConfig.name;
+      const machineContext = agentLifecycle.state.context;
+      const playedIntros = machineContext.playedAgentIntros;
+      const prevAgent = machineContext.previousAgentName; 
 
-      console.log(`[SpeakPage] Initial Setup/Session Update: Agent: ${currentAgentConfig.name}, isIntroPlaying: ${isCurrentlyAnIntroSequence}, hasIntroBeenPlayedBefore: ${hasIntroBeenPlayedBefore} => shouldTriggerHi: ${shouldTriggerAutomaticResponse}`);
+      let triggerHi = false;
+      if (!isIntroAudioPlaying) { 
+        if (prevAgent === undefined) {
+          triggerHi = false;
+        } else {
+          if (playedIntros.has(currentAgentName)) {
+            triggerHi = true;
+          }
+        }
+      }
+
+      const isIntroSequenceForSessionUpdate = isIntroAudioPlaying || (prevAgent === undefined && playedIntros.has(currentAgentName));
+
+      console.log(`[SpeakPage] Initial Setup Logic: Agent: ${currentAgentName}, isIntroAudioPlaying: ${isIntroAudioPlaying}, prevAgent: ${prevAgent}, playedIntros: ${Array.from(playedIntros).join(', ')}, => triggerHi: ${triggerHi}, isIntroSequenceForSessionUpdate: ${isIntroSequenceForSessionUpdate}`);
 
       eventBus.emit(KatoEvents.SESSION_UPDATE_REQUESTED, { 
-        shouldTriggerResponse: shouldTriggerAutomaticResponse, 
-        isIntroSequence: isCurrentlyAnIntroSequence, 
+        shouldTriggerResponse: triggerHi, 
+        isIntroSequence: isIntroSequenceForSessionUpdate,
       });
       
       hasDoneInitialAgentSetupRef.current = true;
     }
-  }, [sessionStatus, currentAgentConfig, eventBus, addTranscriptBreadcrumb, isIntroAudioPlaying, agentLifecycle.state.context.playedAgentIntros]);
+  }, [sessionStatus, currentAgentConfig, eventBus, addTranscriptBreadcrumb, isIntroAudioPlaying, agentLifecycle.state.context]);
 
   useEffect(() => { 
-    if(sessionStatus === "CONNECTED" && currentAgentConfig && hasDoneInitialAgentSetupRef.current) {
-        console.log("[SpeakPage] Audio settings changed (PTT/VAD), requesting session update.");
+    if (sessionStatus === "CONNECTED" && currentAgentConfig) {
+        console.log(`[SpeakPage] Audio settings/intro state changed, requesting session update. isIntroAudioPlaying: ${isIntroAudioPlaying}, currentAudioInputMode: ${currentAudioInputMode}`);
         eventBus.emit(KatoEvents.SESSION_UPDATE_REQUESTED, { 
             shouldTriggerResponse: false,
             isIntroSequence: isIntroAudioPlaying
@@ -508,36 +531,18 @@ function KatoSpeakPageContent() {
   }, []);
 
   useEffect(() => {
-    if (lastServerMessage) {
-      console.log('[SpeakPage] useEffect lastServerMessage: Detected new server message:', lastServerMessage);
-      const eventHandler = createServerEventHandler(
-        contextEventBus, 
-        audioElementRef.current, 
-        contextUrlCodec, 
-        currentAgentConfig, 
-        contextAddTranscriptBreadcrumb, 
-        contextLogServerEvent, 
-        false
-      ); 
-      eventHandler(lastServerMessage);
-    }
-  }, [lastServerMessage, createServerEventHandler, contextEventBus, contextUrlCodec, currentAgentConfig, contextAddTranscriptBreadcrumb, contextLogServerEvent]);
-
-  useEffect(() => {
     if (!audioElementRef.current) {
       audioElementRef.current = new Audio();
       audioElementRef.current.autoplay = true;
       audioElementRef.current.controls = true; // For debugging, remove in production
       console.log('[SpeakPage] Audio element initialized');
       
-      // Update the agent lifecycle machine with the new audio element
       if (agentLifecycle && agentLifecycle.send) {
         console.log('[SpeakPage] Sending audio element to state machine');
         agentLifecycle.send({ type: 'AUDIO_ELEMENT_READY', audioElement: audioElementRef.current });
       }
     }
 
-    // Cleanup function to pause and clear srcObject when the component unmounts.
     return () => {
       if (audioElementRef.current) {
         console.log('[SpeakPage] Cleaning up audio element on unmount');
@@ -630,7 +635,7 @@ function KatoSpeakPageContent() {
               <div ref={userAvatarCircleRef} className="box-content relative w-32 h-32 border-4 border-blue-500 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 text-3xl font-semibold shadow-lg">
                 <span style={{ position: 'relative', zIndex: 1 }}>You</span>
                 {((currentAudioInputMode === 'ptt' && isPTTUserSpeaking) ||
-                  (currentAudioInputMode === 'conversation' && sessionStatus === 'CONNECTED' && activeSpeakerTurn === 'user')) &&
+                  (currentAudioInputMode === 'conversation' && sessionStatus === 'CONNECTED' && activeSpeakerTurn === 'user' && !isOutputAudioBufferActive)) &&
                   (<> <div className="radiating-ring"></div> <div className="radiating-ring"></div> <div className="radiating-ring"></div> </>)}
               </div>
             </div>

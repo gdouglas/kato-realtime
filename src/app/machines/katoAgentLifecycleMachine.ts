@@ -41,7 +41,10 @@ export interface AgentLifecycleMachineContext {
   sessionStatus: 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'ERROR';
   pc?: RTCPeerConnectionType | null;
   dc?: RTCDataChannelType | null;
-  lastServerMessage?: any; // Added for one-shot event handling
+
+  // Added for enhanced event emission
+  previousAgentName?: string;
+  isSwitchingGlobal?: boolean;
 }
 
 export type AgentLifecycleMachineEvent =
@@ -58,7 +61,11 @@ export type AgentLifecycleMachineEvent =
   | { type: 'RTC_DATA_CHANNEL_ERROR_DETECTED'; error: any }
   | { type: 'SERVER_REQUESTED_AGENT_TRANSFER'; agentName: string }
   | { type: 'AUDIO_ELEMENT_READY'; audioElement: HTMLAudioElement }
-  | { type: 'RTC_SERVER_MESSAGE_RECEIVED'; serverMessage: any };
+  | { type: 'RTC_SERVER_MESSAGE_RECEIVED'; serverMessage: any }
+  // Added internal events
+  | { type: '_INTERNAL_MARK_SWITCH_START_AND_EMIT' }
+  | { type: '_INTERNAL_COMPLETE_SWITCH' }
+  | { type: '_INTERNAL_FAIL_SWITCH' };
 
 type SpecificEvent<T extends AgentLifecycleMachineEvent['type']> = Extract<AgentLifecycleMachineEvent, { type: T }>;
 
@@ -139,8 +146,11 @@ export const agentLifecycleMachine = setup({
       context,
       event
     }) => {
+      const newSelectedAgentName = (event as SpecificEvent<'SELECT_AGENT'>).agentName;
       return {
-        selectedAgentName: (event as SpecificEvent<'SELECT_AGENT'>).agentName
+        selectedAgentName: newSelectedAgentName,
+        previousAgentName: context.selectedAgentName, // Store old selected name here
+        error: undefined, // Clear error on new selection attempt
       };
     }),
     storeRtcRefsFromDoneEvent: assign({
@@ -157,17 +167,6 @@ export const agentLifecycleMachine = setup({
       pc: null,
       dc: null,
       sessionStatus: 'DISCONNECTED',
-      lastServerMessage: undefined, // Clear last message on disconnect
-    }),
-    assignLastServerMessage: assign({
-      lastServerMessage: ({ event }) => {
-        const serverMessage = (event as SpecificEvent<'RTC_SERVER_MESSAGE_RECEIVED'>).serverMessage;
-        console.log('[XState] Server message received:', serverMessage.type);
-        return serverMessage;
-      },
-    }),
-    clearLastServerMessage: assign({
-      lastServerMessage: undefined,
     }),
     logBreadcrumbSwitching: ({ context }) => {
       console.log(`[XState] Switching to agent: ${context.selectedAgentName}`);
@@ -247,78 +246,162 @@ export const agentLifecycleMachine = setup({
       const rtcEvent = event as Extract<AgentLifecycleMachineEvent, { type: 'RTC_SERVER_MESSAGE_RECEIVED' }>;
       const serverMessage = rtcEvent.serverMessage;
       
-      const { eventBus } = context;
+      const { eventBus, logServerEvent, addTranscriptBreadcrumb, currentAgentConfig } = context;
 
       if (!serverMessage || !serverMessage.type) {
-        console.warn('[XState] Received empty or typeless server message');
+        console.warn('[XState] processAndRelayServerMessage: Received empty or typeless server message', serverMessage);
         return;
       }
 
-      console.log('[XState] Processing message:', serverMessage.type);
+      // Log the raw server message before processing
+      logServerEvent(serverMessage, `machine_processing_${serverMessage.type}`);
+      console.log(`[XState] processAndRelayServerMessage: Processing type '${serverMessage.type}'`, serverMessage);
 
-      // Handle user's completed speech transcription
-      if (serverMessage.type === 'conversation.item.input_audio_transcription.completed') {
-        if (serverMessage.item_id && typeof serverMessage.transcript === 'string') {
-          console.log(`[XState] User transcript completed: "${serverMessage.transcript}"`);
-          eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM, {
-            idToAssign: serverMessage.item_id,
-            role: 'user',
-            title: serverMessage.transcript,
-            isLocal: true,
-          });
-          // Explicitly ask the server to create a response
-          console.log('[XState] Requesting agent response');
-          eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
-            eventObj: { type: "response.create" },
-            eventNameSuffix: "response_create_after_user_transcript_completed_xstate"
-          });
-        } else {
-          console.warn('[XState] Malformed conversation.item.input_audio_transcription.completed');
-        }
-      }
-      // Handle assistant's completed message item
-      else if (serverMessage.type === 'response.output_item.done' && serverMessage.item?.type === 'message' && serverMessage.item?.role === 'assistant') {
-        let textContent: string | undefined = undefined;
-        const firstContent = serverMessage.item.content?.[0];
-
-        if (firstContent) {
-          if (firstContent.type === 'audio' && typeof firstContent.transcript === 'string') {
-            textContent = firstContent.transcript;
-          } else if (firstContent.type === 'text' && typeof firstContent.text === 'string') {
-            textContent = firstContent.text;
+      switch (serverMessage.type) {
+        case 'session.created':
+          if (serverMessage.session?.id) {
+            eventBus.emit(KatoEvents.SERVER_SESSION_CREATED, { sessionId: serverMessage.session.id });
+            addTranscriptBreadcrumb(
+              `Session ID: ${serverMessage.session.id} (from machine)\nStarted at: ${new Date().toLocaleString()}`
+            );
+          } else {
+            console.warn('[XState] Malformed session.created:', serverMessage);
           }
+          break;
+
+        case 'output_audio_buffer.started':
+          eventBus.emit(KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED, true);
+          break;
+        case 'output_audio_buffer.stopped':
+        case 'output_audio_buffer.done': // Treat done same as stopped for status
+          eventBus.emit(KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED, false);
+          break;
+
+        case 'conversation.item.created': {
+          const itemId = serverMessage.item?.id;
+          const role = serverMessage.item?.role as 'user' | 'assistant' | 'system' | 'function_call' | 'function_call_output';
+          let textContent: string | undefined;
+          const firstContent = serverMessage.item?.content?.[0];
+
+          if (firstContent) {
+            if (firstContent.type === 'text') textContent = firstContent.text;
+            else if (firstContent.type === 'input_text') textContent = firstContent.text;
+            else if (firstContent.type === 'audio') textContent = firstContent.transcript;
+            else if (role === 'user' && !textContent) textContent = "[Processing...]";
+          } else if (role === 'user') {
+            textContent = "[Processing user input...]";
+          }
+          
+          if (itemId && role) {
+            eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM_CREATED, { itemId, role, text: textContent || "" });
+          } else {
+            console.warn('[XState] Malformed conversation.item.created:', serverMessage);
+          }
+          break;
+        }
+
+        case 'conversation.item.input_audio_transcription.completed':
+          if (serverMessage.item_id && typeof serverMessage.transcript === 'string') {
+            eventBus.emit(KatoEvents.SERVER_USER_TRANSCRIPT_COMPLETED, { 
+              itemId: serverMessage.item_id, 
+              transcript: serverMessage.transcript 
+            });
+            // Request agent response
+            eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
+              eventObj: { type: "response.create" },
+              eventNameSuffix: "response_create_after_user_transcript_completed_xstate_machine"
+            });
+          } else {
+            console.warn('[XState] Malformed conversation.item.input_audio_transcription.completed:', serverMessage);
+          }
+          break;
+
+        case 'response.audio_transcript.delta': {
+          const itemId = serverMessage.item_id;
+          const deltaText = serverMessage.delta;
+          if (itemId && typeof deltaText === 'string') {
+            eventBus.emit(KatoEvents.SERVER_ASSISTANT_DELTA_RECEIVED, { itemId, deltaText });
+          } else {
+            // console.warn('[XState] Malformed response.audio_transcript.delta:', serverMessage); // Can be noisy
+          }
+          break;
         }
         
-        if (serverMessage.item.id && typeof textContent === 'string') {
-          console.log(`[XState] Assistant transcript complete: "${textContent.substring(0, 50)}${textContent.length > 50 ? '...' : ''}"`);
-          eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM, {
-            idToAssign: serverMessage.item.id,
-            role: 'assistant',
-            title: textContent,
-          });
-        } else {
-          console.warn('[XState] Malformed response.output_item.done for assistant message');
+        case 'response.output_item.done': {
+          const item = serverMessage.item;
+          if (item && item.id && item.type === 'message' && item.role === 'assistant') {
+            let textContent: string | undefined = undefined;
+            const firstContent = item.content?.[0];
+            if (firstContent) {
+              if (firstContent.type === 'audio' && typeof firstContent.transcript === 'string') {
+                textContent = firstContent.transcript;
+              } else if (firstContent.type === 'text' && typeof firstContent.text === 'string') {
+                textContent = firstContent.text;
+              }
+            }
+            if (textContent !== undefined) {
+              eventBus.emit(KatoEvents.SERVER_ASSISTANT_MESSAGE_COMPLETED, { 
+                itemId: item.id, 
+                fullText: textContent,
+              });
+              eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE, {
+                itemId: item.id,
+                status: 'DONE', 
+                finalText: textContent 
+              });
+            } else {
+              console.warn('[XState] Malformed response.output_item.done (assistant message, missing text):', serverMessage);
+            }
+          } else if (item && item.type === 'function_call_output') {
+            // Function call *results* are processed by the server and sent back.
+            // This 'done' might relate to the server acknowledging it processed our function_call_output.
+          } else {
+            // console.warn('[XState] Unhandled or malformed response.output_item.done:', serverMessage);
+          }
+          break;
         }
-      }
-      // Handle output audio buffer status
-      else if (serverMessage.type === 'output_audio_buffer.started') {
-        console.log('[XState] Output audio buffer started');
-        eventBus.emit(KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED, true);
-      } else if (serverMessage.type === 'output_audio_buffer.stopped' || serverMessage.type === 'output_audio_buffer.done') {
-        console.log('[XState] Output audio buffer stopped/done');
-        eventBus.emit(KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED, false);
-      }
-      // Log receivers when server indicates audio is done sending
-      else if (serverMessage.type === 'response.audio.done') {
-        console.log('[XState] Audio response done');
-      }
-      // User actual speech VAD events (from server VAD)
-      else if (serverMessage.type === 'input_audio_transcription.user_speech.started') {
-        console.log('[XState] User speech started (server VAD)');
-        eventBus.emit(KatoEvents.USER_SPEECH_STARTED);
-      } else if (serverMessage.type === 'input_audio_transcription.user_speech.stopped') {
-        console.log('[XState] User speech stopped (server VAD)');
-        eventBus.emit(KatoEvents.USER_SPEECH_STOPPED);
+
+        case 'response.done': {
+          if (serverMessage.response?.output) {
+            serverMessage.response.output.forEach((outputItem: any) => {
+              if (outputItem.type === 'function_call' && outputItem.name && outputItem.arguments) {
+                eventBus.emit(KatoEvents.SERVER_FUNCTION_CALL_REQUESTED, {
+                  callId: outputItem.call_id, 
+                  functionName: outputItem.name,
+                  argsString: outputItem.arguments,
+                });
+              } else if (outputItem.type === 'message' && outputItem.role === 'assistant' && !outputItem.content?.[0]?.transcript && outputItem.content?.[0]?.text) {
+                const itemId = outputItem.id;
+                const textContent = outputItem.content?.[0]?.text;
+                if (itemId && textContent) {
+                   eventBus.emit(KatoEvents.SERVER_ASSISTANT_MESSAGE_COMPLETED, { 
+                       itemId: itemId, 
+                       fullText: textContent 
+                   });
+                   eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE, {
+                       itemId: itemId,
+                       status: 'DONE',
+                       finalText: textContent
+                   });
+                }
+              }
+            });
+          }
+          break;
+        }
+        
+        case 'input_audio_transcription.user_speech.started':
+          eventBus.emit(KatoEvents.USER_SPEECH_STARTED);
+          break;
+        case 'input_audio_transcription.user_speech.stopped':
+          eventBus.emit(KatoEvents.USER_SPEECH_STOPPED);
+          break;
+
+        default:
+          console.warn(`[XState] processAndRelayServerMessage: Unhandled server message type: ${serverMessage.type}`, serverMessage);
+          // Optionally, emit a generic event for unhandled messages if useful for debugging elsewhere
+          // eventBus.emit(KatoEvents.UNKNOWN_SERVER_MESSAGE, serverMessage);
+          break;
       }
     },
     assignAudioElement: assign(({
@@ -334,6 +417,75 @@ export const agentLifecycleMachine = setup({
       }
       return {};
     }),
+    // Action to emit CURRENT_AGENT_CHANGED - call after currentAgentConfig is set
+    emitCurrentAgentChanged: ({ context }) => {
+      if (context.currentAgentConfig && context.eventBus) {
+        console.log('[XState Actions] Emitting CURRENT_AGENT_CHANGED for', context.currentAgentConfig.name);
+        context.eventBus.emit(KatoEvents.CURRENT_AGENT_CHANGED, {
+          newAgentName: context.currentAgentConfig.name,
+          oldAgentName: context.previousAgentName, // Relies on previousAgentName being set
+          agentConfig: context.currentAgentConfig,
+        });
+      }
+    },
+    emitAgentSwitchStarted: ({ context }) => {
+      if (context.eventBus && context.selectedAgentName) {
+        console.log('[XState Actions] Emitting AGENT_SWITCH_STARTED for', context.selectedAgentName);
+        context.eventBus.emit(KatoEvents.AGENT_SWITCH_STARTED, {
+          newAgentName: context.selectedAgentName, // The agent we are switching TO
+          oldAgentName: context.previousAgentName,    // The agent we were on
+        });
+      }
+    },
+    emitAgentSwitchCompleted: ({ context }) => {
+      if (context.eventBus && context.currentAgentConfig) { // Should be currentAgentConfig for completion
+        console.log('[XState Actions] Emitting AGENT_SWITCH_COMPLETED for', context.currentAgentConfig.name);
+        context.eventBus.emit(KatoEvents.AGENT_SWITCH_COMPLETED, {
+          agentName: context.currentAgentConfig.name,
+          success: true,
+        });
+      }
+    },
+    emitAgentSwitchFailed: ({ context }) => {
+      if (context.eventBus && context.selectedAgentName) { // selectedAgentName is the target of the failed switch
+        console.log('[XState Actions] Emitting AGENT_SWITCH_FAILED for', context.selectedAgentName);
+        context.eventBus.emit(KatoEvents.AGENT_SWITCH_FAILED, {
+          agentName: context.selectedAgentName,
+          success: false,
+          error: context.error ? (typeof context.error === 'string' ? context.error : JSON.stringify(context.error)) : 'Unknown switch error',
+        });
+      }
+    },
+    emitPlayAgentIntroRequested: ({ context }) => {
+      if (context.eventBus && context.currentAgentConfig) {
+        console.log('[XState Actions] Emitting PLAY_AGENT_INTRO_REQUESTED for', context.currentAgentConfig.name);
+        context.eventBus.emit(KatoEvents.PLAY_AGENT_INTRO_REQUESTED, {
+          agentConfig: context.currentAgentConfig,
+        });
+      }
+    },
+    emitAgentIntroPlaybackCompleted: ({ context, event }) => {
+      const output = (event as any).output as { agentName: string; success: boolean; error?: string; needsUserInteraction?: boolean };
+      if (context.eventBus && output.agentName) {
+        console.log('[XState Actions] Emitting AGENT_INTRO_PLAYBACK_COMPLETED (onDone) for', output.agentName);
+        context.eventBus.emit(KatoEvents.AGENT_INTRO_PLAYBACK_COMPLETED, {
+          agentName: output.agentName,
+          playedSuccessfully: output.success,
+          error: output.error,
+        });
+      }
+    },
+    emitAgentIntroPlaybackFailedOnError: ({ context, event }) => {
+      const errorData = (event as any).data;
+      if (context.eventBus && context.currentAgentConfig) {
+        console.log('[XState Actions] Emitting AGENT_INTRO_PLAYBACK_COMPLETED (onError) for', context.currentAgentConfig.name);
+        context.eventBus.emit(KatoEvents.AGENT_INTRO_PLAYBACK_COMPLETED, {
+          agentName: context.currentAgentConfig.name,
+          playedSuccessfully: false,
+          error: errorData instanceof Error ? errorData.message : String(errorData),
+        });
+      }
+    },
   },
   actors: {
     fetchTokenAndConnectRTC: fromPromise(async ({ input, self }) => {
@@ -420,44 +572,34 @@ export const agentLifecycleMachine = setup({
       const currentContext = input as AgentLifecycleMachineContext;
       let { 
         currentAgentConfig,
-        audioElement, // This can be null
+        // audioElement, // No longer take from context for this actor
         eventBus,
-        addTranscriptBreadcrumb, // This will be console.log for now
         isAudioPlaybackEnabled,
         logClientEvent,
       } = currentContext;
 
       const agentName = currentAgentConfig?.name || 'unknown';
+      console.log(`[XState Actor DEBUG] playAgentIntro: START for ${agentName}`);
 
       if (!currentAgentConfig || !currentAgentConfig.introAudio?.text) {
-        // addTranscriptBreadcrumb(`[XState Actor] No intro text for ${agentName}, skipping playback.`);
-        console.log(`[XState Actor] No intro text for ${agentName}, skipping playback.`);
+        console.log(`[XState Actor DEBUG] playAgentIntro: No intro text for ${agentName}, skipping playback.`);
         return { agentName, success: true }; 
       }
 
-      // addTranscriptBreadcrumb(`[XState Actor] Preparing intro for ${agentName}...`);
-      console.log(`[XState Actor] Preparing intro for ${agentName}...`);
+      console.log(`[XState Actor DEBUG] playAgentIntro: Preparing intro for ${agentName}`);
       logClientEvent({ agentName }, "play_intro_actor_started");
 
-      // Manage audio element internally if not provided or not usable
-      let localAudioElement: HTMLAudioElement;
-      if (audioElement && typeof audioElement.play === 'function') { // Check if it looks like a valid audio element
-        localAudioElement = audioElement;
-      } else {
-        console.warn(`[XState Actor] audioElement from context is null or not usable for ${agentName}. Creating a new one for this intro.`);
-        localAudioElement = new Audio();
-      }
+      console.log(`[XState Actor DEBUG] playAgentIntro: Creating a new Audio element for intro: ${agentName}`);
+      const localAudioElement = new Audio(); // Always use a fresh Audio element for intros
 
-      // Ensure isAudioPlaybackEnabled is applied if relevant to the localAudioElement
       if (typeof isAudioPlaybackEnabled === 'boolean') {
-        localAudioElement.autoplay = isAudioPlaybackEnabled; // Note: autoplay after src is set might be more reliable for some browsers.
+        localAudioElement.autoplay = isAudioPlaybackEnabled;
       }
 
       let audioBlobUrl: string | null = null;
 
       try {
-        // addTranscriptBreadcrumb(`[XState Actor] Fetching intro audio for ${agentName}...`);
-        console.log(`[XState Actor] Fetching intro audio for ${agentName}...`);
+        console.log(`[XState Actor DEBUG] playAgentIntro: Fetching intro audio for ${agentName}...`);
         const response = await fetch(`${API_BASE_URL}/api/v1/audio/speech`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -472,44 +614,37 @@ export const agentLifecycleMachine = setup({
         if (!response.ok) {
           const errorData = await response.text();
           const errorMsg = `Failed to fetch intro audio for ${agentName}: ${response.status} ${errorData}`;
+          console.error(`[XState Actor DEBUG] playAgentIntro: ${errorMsg}`);
           throw new Error(errorMsg);
         }
 
         const audioBlob = await response.blob();
         audioBlobUrl = URL.createObjectURL(audioBlob);
         localAudioElement.src = audioBlobUrl;
-        if (localAudioElement.autoplay) { // If autoplay was set, some browsers might require play() to be called again or after src set
-            console.log("[XState Actor] Attempting to honor autoplay after setting src.");
+        if (localAudioElement.autoplay) { 
+            console.log("[XState Actor DEBUG] playAgentIntro: Attempting to honor autoplay after setting src.");
         }
 
-        // Return a new promise that resolves/rejects based on audio events
         return new Promise((resolve, reject) => {
           localAudioElement.onended = () => {
-            // addTranscriptBreadcrumb(`[XState Actor] Intro audio finished for ${agentName}.`);
-            console.log(`[XState Actor] Intro audio finished for ${agentName}.`);
+            console.log(`[XState Actor DEBUG] playAgentIntro: onended triggered for ${agentName}.`);
             logClientEvent({ agentName }, "play_intro_actor_ended");
             if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
             resolve({ agentName, success: true });
           };
 
           localAudioElement.onerror = (e) => {
-            const errorMsg = `[XState Actor] Intro audio error for ${agentName}.`;
-            console.error(errorMsg, e); // Log the original event object
-            // addTranscriptBreadcrumb(errorMsg);
-            console.error(errorMsg);
+            console.error(`[XState Actor DEBUG] playAgentIntro: onerror triggered for ${agentName}.`, e);
             logClientEvent({ agentName, error: (e instanceof ErrorEvent ? e.message : String(e)) }, "play_intro_actor_audio_error");
             if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
-            resolve({ agentName, success: false, error: "Audio playback error" });
+            resolve({ agentName, success: false, error: "Audio playback error" }); // Still resolve, but with success:false
           };
 
-          // addTranscriptBreadcrumb(`[XState Actor] Attempting to play intro for ${agentName}...`);
-          console.log(`[XState Actor] Attempting to play intro for ${agentName}...`);
+          console.log(`[XState Actor DEBUG] playAgentIntro: Attempting to play intro for ${agentName}...`);
           localAudioElement.play()
             .then(() => {
-              // addTranscriptBreadcrumb(`[XState Actor] Intro playback started for ${agentName}.`);
-              console.log(`[XState Actor] Intro playback started for ${agentName}.`);
+              console.log(`[XState Actor DEBUG] playAgentIntro: Playback started for ${agentName}.`);
               logClientEvent({ agentName }, "play_intro_actor_playback_started");
-              // The promise resolves via onended or onerror
             })
             .catch(playError => {
               let errorType = "Playback failed";
@@ -517,11 +652,9 @@ export const agentLifecycleMachine = setup({
               if (playError.name === "NotAllowedError") {
                 errorType = "Playback requires user interaction (NotAllowedError)";
                 needsUserInteraction = true;
-                // addTranscriptBreadcrumb(`[XState Actor] Intro playback for ${agentName} requires user interaction.`);
-                console.warn(`[XState Actor] Intro playback for ${agentName} requires user interaction.`);
+                console.warn(`[XState Actor DEBUG] playAgentIntro: Playback for ${agentName} requires user interaction.`);
               } else {
-                // addTranscriptBreadcrumb(`[XState Actor] Error playing intro for ${agentName}: ${playError.message}`);
-                console.error(`[XState Actor] Error playing intro for ${agentName}: ${playError.message}`);
+                console.error(`[XState Actor DEBUG] playAgentIntro: Error playing intro for ${agentName}: ${playError.message}`);
               }
               logClientEvent({ agentName, error: playError.message, name: playError.name }, "play_intro_actor_play_catch");
               if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
@@ -530,31 +663,21 @@ export const agentLifecycleMachine = setup({
         });
 
       } catch (error: any) {
-        const errorMsg = `[XState Actor] Error in playIntro for ${agentName}: ${error.message}`;
-        // addTranscriptBreadcrumb(errorMsg);
-        console.error(errorMsg);
+        console.error(`[XState Actor DEBUG] playAgentIntro: Outer catch for ${agentName}: ${error.message}`);
         logClientEvent({ agentName, error: error.message }, "play_intro_actor_general_error");
         if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
-        // This error will be caught by onError in the invoke definition
-        // To align with resolving the promise, we can do:
         return { agentName, success: false, error: error.message, needsUserInteraction: error.name === "NotAllowedError" };
       }
     }),
     disconnectRTC: fromPromise(async ({ input }) => {
-      // Input is the machine's context, which includes pc, dc, addTranscriptBreadcrumb, logClientEvent
-      // It also needs an 'isSwitching' flag, passed when invoking the actor.
       const currentContext = input as AgentLifecycleMachineContext & { isSwitching?: boolean };
       const { pc, dc, addTranscriptBreadcrumb, logClientEvent, isSwitching } = currentContext;
-
       const mode = isSwitching ? "for agent switch" : "manually";
-      addTranscriptBreadcrumb(`[XState Actor] Disconnecting RTC (${mode})...`);
-      if (logClientEvent) {
-        logClientEvent({ isSwitching }, "rtc_disconnect_actor_started");
-      }
+      console.log(`[XState Actor DEBUG] disconnectRTC: START (${mode})`);
 
       try {
         if (pc) {
-          // Stop all tracks for all senders
+          console.log(`[XState Actor DEBUG] disconnectRTC: Closing PeerConnection.`);
           const senders = pc.getSenders();
           senders.forEach((sender: RTCRtpSender) => {
             if (sender.track) {
@@ -563,29 +686,24 @@ export const agentLifecycleMachine = setup({
           });
           pc.close();
         }
-
         if (dc) {
-          // Clear handlers to prevent any further events if not already handled by pc.close()
+          console.log(`[XState Actor DEBUG] disconnectRTC: Clearing DataChannel handlers.`);
           dc.onopen = null;
           dc.onclose = null;
           dc.onerror = null;
           dc.onmessage = null;
-          // dc.close(); // pc.close() should handle closing the data channel as well.
+          // dc.close(); // pc.close() should also close the data channel.
         }
-
-        addTranscriptBreadcrumb("[XState Actor] RTC Disconnected.");
+        console.log(`[XState Actor DEBUG] disconnectRTC: COMPLETED (${mode}).`);
         if (logClientEvent) {
           logClientEvent({ isSwitching }, "rtc_disconnect_actor_completed");
         }
-        // Resolve the promise to signal completion. 
-        // The machine will then transition and run actions like 'clearRtcRefs' and 'setDisconnectedStatus'.
         return Promise.resolve(); 
-      } catch (error) {
-        addTranscriptBreadcrumb(`[XState Actor] Error during RTC disconnection: ${error}`);
+      } catch (error: any) {
+        console.error(`[XState Actor DEBUG] disconnectRTC: ERROR (${mode}): ${error.message}`);
         if (logClientEvent) {
-          logClientEvent({ error, isSwitching }, "rtc_disconnect_actor_error");
+          logClientEvent({ error: error.message, isSwitching }, "rtc_disconnect_actor_error");
         }
-        // Propagate the error if any operation unexpectedly throws
         return Promise.reject(error);
       }
     }),
@@ -638,7 +756,10 @@ export const agentLifecycleMachine = setup({
     sessionStatus: 'DISCONNECTED',
     pc: null,
     dc: null,
-    lastServerMessage: undefined,
+
+    // Added for enhanced event emission
+    previousAgentName: undefined,
+    isSwitchingGlobal: false,
   }),
   on: {
     RTC_CONNECTED: {
@@ -666,11 +787,17 @@ export const agentLifecycleMachine = setup({
   },
   states: {
     idle: {
-      entry: ['clearSelectionAndConfig', 'clearRtcRefs', 'setDisconnectedStatus'],
+      entry: assign({
+        selectedAgentName: undefined,
+        currentAgentConfig: null,
+        error: undefined,
+        sessionStatus: 'DISCONNECTED',
+        isSwitchingGlobal: false, // Reset switching flag
+      }),
       on: {
         SELECT_AGENT: {
-          target: 'preparingToSwitch',
-          actions: ['setSelectedAgentName', 'findAgentConfigAction', 'clearError', 'logBreadcrumbSwitching']
+          target: 'activatingAgent', // Go directly to activating if idle
+          actions: ['setSelectedAgentName', 'clearError']
         },
         SERVER_REQUESTED_AGENT_TRANSFER: { 
           target: 'preparingToSwitch',
@@ -697,35 +824,59 @@ export const agentLifecycleMachine = setup({
       },
     },
     preparingToSwitch: {
-      entry: ['findAgentConfigAction', 'logBreadcrumbSwitching'],
+      entry: ['clearError', assign({ isSwitchingGlobal: true }), 'emitAgentSwitchStarted', 'logBreadcrumbSwitching'],
       always: [
-        {
-          guard: 'isAgentIntroAlreadyPlayed',
-          target: '#katoAgentLifecycle.disconnectingForSwitch'
-        },
-        { target: '#katoAgentLifecycle.activatingAgent' },
+        { target: 'disconnectingForSwitch', guard: ({ context }) => !!context.pc },
+        { target: 'activatingAgent' }, // If no pc, go straight to activating new one
       ],
     },
     disconnectingForSwitch: {
+      entry: () => console.log('[XState DEBUG] Entering disconnectingForSwitch state'),
       invoke: {
         id: 'disconnectForSwitchActor',
         src: 'disconnectRTC',
         input: ({ context }) => ({ ...context, isSwitching: true }),
-        onDone: '#katoAgentLifecycle.activatingAgent',
+        onDone: {
+          target: '#katoAgentLifecycle.activatingAgent',
+          actions: () => console.log('[XState DEBUG] disconnectRTC actor completed (onDone)')
+        },
         onError: {
           target: '#katoAgentLifecycle.switchError',
-          actions: ['assignErrorFromEventData', 'setErrorStatus', 'logErrorSwitchFailed']
+          actions: [
+            () => console.error('[XState DEBUG] disconnectRTC actor errored (onError)'),
+            'assignErrorFromEventData', 
+            'setErrorStatus', 
+            'logErrorSwitchFailed'
+          ]
         }
       },
     },
     activatingAgent: {
-      entry: ['logBreadcrumbActivating'],
+      entry: [
+        ({ context, self }) => {
+          if (!context.isSwitchingGlobal) {
+            console.log('[XState DEBUG] ActivatingAgent: Marking switch start internally as isSwitchingGlobal was false.');
+            self.send({ type: '_INTERNAL_MARK_SWITCH_START_AND_EMIT' } as any);
+          }
+        },
+        'findAgentConfigAction',
+        // Log currentAgentConfig before emitting change
+        ({context}) => console.log('[XState DEBUG] ActivatingAgent: currentAgentConfig before emitCurrentAgentChanged:', context.currentAgentConfig?.name),
+        'emitCurrentAgentChanged',
+        'logBreadcrumbActivating'
+      ],
+      on: {
+        _INTERNAL_MARK_SWITCH_START_AND_EMIT: {
+          actions: [assign({ isSwitchingGlobal: true }), 'emitAgentSwitchStarted']
+        }
+      },
       always: [
         { target: '#katoAgentLifecycle.playingIntro', guard: 'introNeededCond' },
         { target: '#katoAgentLifecycle.connecting' },
       ],
     },
     playingIntro: {
+      entry: ['emitPlayAgentIntroRequested'],
       invoke: {
         id: 'playAgentIntro',
         src: 'playAgentIntro',
@@ -734,18 +885,22 @@ export const agentLifecycleMachine = setup({
             {
                 target: '#katoAgentLifecycle.awaitingAudioModalConfirmation',
                 guard: ({ event }) => (event.output as { success: boolean, needsUserInteraction?: boolean }).needsUserInteraction === true,
-                actions: assign (({event}) => {
+                actions: [
+                  assign (({event}) => {
                     const output = event.output as {error?: string, needsUserInteraction?: boolean};
                     if (output.needsUserInteraction && output.error) {
                         return { error: output.error };
                     }
                     return {};
-                })
+                  }),
+                  'emitAgentIntroPlaybackCompleted'
+                ]
             },
             {
                 target: '#katoAgentLifecycle.connecting',
                 guard: ({ event }) => (event.output as { success: boolean }).success, 
-                actions: assign (({context, event}) => {
+                actions: [
+                  assign (({context, event}) => {
                     const output = event.output as {agentName: string, success: boolean};
                     if (output.success && output.agentName) {
                         const newSet = new Set(context.playedAgentIntros);
@@ -753,16 +908,21 @@ export const agentLifecycleMachine = setup({
                         return { playedAgentIntros: newSet };
                     }
                     return {};
-                })
+                  }),
+                  'emitAgentIntroPlaybackCompleted'
+                ]
             },
             {
                 target: '#katoAgentLifecycle.errorIntroFailed',
-                actions: assign (({event}) => ({ error: (event.output as {error?: string}).error || 'Intro playback failed due to unhandled outcome' }))
+                actions: [
+                  assign (({event}) => ({ error: (event.output as {error?: string}).error || 'Intro playback failed due to unhandled outcome' })),
+                  'emitAgentIntroPlaybackCompleted'
+                ]
             }
         ],
         onError: {
           target: '#katoAgentLifecycle.errorIntroFailed',
-          actions: ['assignErrorFromEventData'],
+          actions: ['assignErrorFromEventData', 'emitAgentIntroPlaybackFailedOnError'],
         },
       },
       on: {
@@ -802,9 +962,21 @@ export const agentLifecycleMachine = setup({
       }
     },
     agentActive: {
-      entry: ['logBreadcrumbAgentActive', 'setConnectedStatus', 'assignRtcEventHandlers'],
-      exit: ['clearRtcEventHandlers'], // Clear handlers on exit
+      entry: [
+        'setConnectedStatus',
+        'assignRtcEventHandlers',
+        'logBreadcrumbAgentActive',
+        ({ context, self }) => {
+          if (context.isSwitchingGlobal) {
+            self.send({ type: '_INTERNAL_COMPLETE_SWITCH' } as any);
+          }
+        }
+      ],
+      onExit: ['clearRtcEventHandlers'],
       on: {
+        _INTERNAL_COMPLETE_SWITCH: {
+          actions: ['emitAgentSwitchCompleted', assign({ isSwitchingGlobal: false })]
+        },
         RTC_DISCONNECTED: [
           {
             guard: 'isUnexpectedRtcDisconnect',
@@ -840,12 +1012,12 @@ export const agentLifecycleMachine = setup({
           ]
         },
         RTC_SERVER_MESSAGE_RECEIVED: {
-          actions: ['assignLastServerMessage', 'processAndRelayServerMessage']
+          actions: ['processAndRelayServerMessage']
         },
         AUDIO_ELEMENT_READY: {
           actions: ['assignAudioElement']
         }
-      }
+      },
     },
     disconnectingManually: {
       entry: ['logBreadcrumbDisconnectingManually'],
@@ -864,40 +1036,44 @@ export const agentLifecycleMachine = setup({
       },
     },
     switchError: {
-      entry: ['logErrorSwitchFailed', 'setErrorStatus', 'clearRtcRefs'],
+      entry: ['setErrorStatus', 'logErrorSwitchFailed', 
+        ({ context, self }) => {
+          if (context.isSwitchingGlobal) {
+            self.send({ type: '_INTERNAL_FAIL_SWITCH' } as any);
+          }
+        }
+      ],
       on: {
-        RETRY: '#katoAgentLifecycle.preparingToSwitch',
-        SELECT_AGENT: {
-          target: '#katoAgentLifecycle.idle',
-          actions: ['setSelectedAgentName', 'findAgentConfigAction', 'clearError', 'logBreadcrumbSwitching']
-        },
-        USER_REQUESTED_DISCONNECT: { target: '#katoAgentLifecycle.disconnectingManually' },
-        CANCEL_SWITCH: { target: '#katoAgentLifecycle.idle', actions: ['clearSelectionAndConfig', 'setDisconnectedStatus'] }
-      },
+        RETRY: 'preparingToSwitch',
+        _INTERNAL_FAIL_SWITCH: { actions: ['emitAgentSwitchFailed', assign({isSwitchingGlobal: false})]},
+      }
     },
     errorIntroFailed: {
-      entry: ['logErrorIntroFailed', 'setErrorStatus'],
-      on: {
-        RETRY: '#katoAgentLifecycle.playingIntro',
-        CANCEL_SWITCH: { target: '#katoAgentLifecycle.idle', actions: ['clearSelectionAndConfig', 'clearRtcRefs', 'setDisconnectedStatus'] },
-        SELECT_AGENT: {
-          target: '#katoAgentLifecycle.idle',
-          actions: ['setSelectedAgentName', 'findAgentConfigAction', 'clearError', 'logBreadcrumbSwitching']
+      entry: ['setErrorStatus', 'logErrorIntroFailed',
+        ({ context, self }) => { 
+          if (context.isSwitchingGlobal) {
+            self.send({ type: '_INTERNAL_FAIL_SWITCH' } as any);
+          }
         }
+      ],
+      on: {
+        RETRY: 'playingIntro',
+        SELECT_AGENT: { target: 'preparingToSwitch', actions: ['setSelectedAgentName', 'clearError'] },
+        _INTERNAL_FAIL_SWITCH: { actions: ['emitAgentSwitchFailed', assign({isSwitchingGlobal: false})]},
       },
     },
     connectionError: {
-      entry: ['logErrorConnectionFailed', 'setErrorStatus', 'clearRtcRefs'],
-      on: {
-        RETRY: '#katoAgentLifecycle.connecting',
-        SELECT_AGENT: {
-          target: '#katoAgentLifecycle.idle',
-          actions: ['setSelectedAgentName', 'findAgentConfigAction', 'clearError', 'logBreadcrumbSwitching']
-        },
-        USER_REQUESTED_DISCONNECT: { target: '#katoAgentLifecycle.disconnectingManually' },
-        AUDIO_ELEMENT_READY: {
-          actions: ['assignAudioElement']
+      entry: ['setErrorStatus', 'logErrorConnectionFailed',
+        ({ context, self }) => {
+          if (context.isSwitchingGlobal) {
+            self.send({ type: '_INTERNAL_FAIL_SWITCH' } as any);
+          }
         }
+      ],
+      on: {
+        RETRY: 'connecting',
+        SELECT_AGENT: { target: 'preparingToSwitch', actions: ['setSelectedAgentName', 'clearError'] },
+        _INTERNAL_FAIL_SWITCH: { actions: ['emitAgentSwitchFailed', assign({isSwitchingGlobal: false})]},
       },
     }
   }
