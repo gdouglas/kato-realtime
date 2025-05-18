@@ -84,10 +84,7 @@ function KatoTextPageContent() {
   // const handleServerEventRef = useRef(createServerEventHandler(eventBus)); // Moved to KatoRTCContext
 
   const { isIntroAudioPlaying } = useIntroAudio({
-    addTranscriptBreadcrumb,
-    sessionStatus, 
-    manualDisconnect, 
-    currentAgentConfig, 
+    addTranscriptBreadcrumb
   });
 
   const introButtonClickedRef = useRef(false);
