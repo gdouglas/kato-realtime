@@ -74,12 +74,12 @@ export const agentLifecycleMachine = setup({
       context,
       event
     }) => {
-      console.log(`[XState] findAgentConfigAction: Looking for agent: ${context.selectedAgentName} in configs:`, context.agentConfigs);
+      console.log(`[XState] Looking for agent: ${context.selectedAgentName}`);
       const agent = context.agentConfigs.find(a => a.name === context.selectedAgentName);
       if (!agent) {
-        console.error(`[XState] findAgentConfigAction: Agent config NOT FOUND for ${context.selectedAgentName}`);
+        console.error(`[XState] Agent config NOT FOUND for ${context.selectedAgentName}`);
       } else {
-        console.log(`[XState] findAgentConfigAction: Agent config FOUND for ${context.selectedAgentName}:`, agent);
+        console.log(`[XState] Agent config found for ${context.selectedAgentName}`);
       }
       return {
         currentAgentConfig: agent || null
@@ -145,11 +145,11 @@ export const agentLifecycleMachine = setup({
     }),
     storeRtcRefsFromDoneEvent: assign({
       pc: ({ event }: { event: { output?: { pc?: RTCPeerConnectionType, dc?: RTCDataChannelType } } }) => {
-          console.log("[XState DEBUG] storeRtcRefsFromDoneEvent: Storing PC from event.output", event.output?.pc);
+          console.log("[XState] Storing peer connection reference");
           return event.output?.pc;
       },
       dc: ({ event }: { event: { output?: { pc?: RTCPeerConnectionType, dc?: RTCDataChannelType } } }) => {
-          console.log("[XState DEBUG] storeRtcRefsFromDoneEvent: Storing DC from event.output", event.output?.dc);
+          console.log("[XState] Storing data channel reference");
           return event.output?.dc;
       }
     }),
@@ -162,7 +162,7 @@ export const agentLifecycleMachine = setup({
     assignLastServerMessage: assign({
       lastServerMessage: ({ event }) => {
         const serverMessage = (event as SpecificEvent<'RTC_SERVER_MESSAGE_RECEIVED'>).serverMessage;
-        console.log('[XState DEBUG] assignLastServerMessage: Received server message:', serverMessage);
+        console.log('[XState] Server message received:', serverMessage.type);
         return serverMessage;
       },
     }),
@@ -170,73 +170,73 @@ export const agentLifecycleMachine = setup({
       lastServerMessage: undefined,
     }),
     logBreadcrumbSwitching: ({ context }) => {
-      console.log(`[XState DEBUG] logBreadcrumbSwitching: Attempting to log for agent: ${context.selectedAgentName}`);
-      // context.addTranscriptBreadcrumb(`[XState] Switching to agent: ${context.selectedAgentName}`);
+      console.log(`[XState] Switching to agent: ${context.selectedAgentName}`);
+      context.addTranscriptBreadcrumb(`Switching to agent: ${context.selectedAgentName}`);
     },
     logBreadcrumbActivating: ({ context }) => {
-      console.log(`[XState DEBUG] logBreadcrumbActivating: Attempting to log for agent: ${context.currentAgentConfig?.name}`);
-      // context.addTranscriptBreadcrumb(`[XState] Activating agent: ${context.currentAgentConfig?.name}`);
+      console.log(`[XState] Activating agent: ${context.currentAgentConfig?.name}`);
+      context.addTranscriptBreadcrumb(`Activating agent: ${context.currentAgentConfig?.name}`);
     },
     logBreadcrumbConnecting: ({ context }) => {
-      console.log(`[XState DEBUG] logBreadcrumbConnecting: Attempting to log for agent: ${context.currentAgentConfig?.name}`);
-      // context.addTranscriptBreadcrumb(`[XState] Connecting to agent: ${context.currentAgentConfig?.name}`);
+      console.log(`[XState] Connecting to agent: ${context.currentAgentConfig?.name}`);
+      context.addTranscriptBreadcrumb(`Connecting to agent: ${context.currentAgentConfig?.name}`);
     },
     logBreadcrumbAgentActive: ({ context }) => {
-      console.log(`[XState DEBUG] logBreadcrumbAgentActive: Attempting to log for agent: ${context.currentAgentConfig?.name}`);
-      // context.addTranscriptBreadcrumb(`[XState] Agent active: ${context.currentAgentConfig?.name}`);
+      console.log(`[XState] Agent active: ${context.currentAgentConfig?.name}`);
+      context.addTranscriptBreadcrumb(`Agent active: ${context.currentAgentConfig?.name}`);
     },
     logBreadcrumbDisconnectingManually: ({context}) => {
-      console.log("[XState DEBUG] logBreadcrumbDisconnectingManually: Attempting to log.");
-      // context.addTranscriptBreadcrumb('[XState] Disconnecting manually...');
+      console.log("[XState] Disconnecting manually");
+      context.addTranscriptBreadcrumb('Disconnecting...');
     },
     logErrorSwitchFailed: ({ context }) => {
-      console.error(`[XState DEBUG] logErrorSwitchFailed: Attempting to log error: ${context.error}`);
-      // context.addTranscriptBreadcrumb(`[XState] Error: Switch failed. ${context.error}`);
+      console.error(`[XState] Switch failed: ${context.error}`);
+      context.addTranscriptBreadcrumb(`Error: Switch failed. ${context.error}`);
     },
     logErrorIntroFailed: ({ context }) => {
-      console.error(`[XState DEBUG] logErrorIntroFailed: Attempting to log error: ${context.error}`);
-      // context.addTranscriptBreadcrumb(`[XState] Error: Intro failed. ${context.error}`);
+      console.error(`[XState] Intro playback failed: ${context.error}`);
+      context.addTranscriptBreadcrumb(`Error: Intro failed. ${context.error}`);
     },
     logErrorConnectionFailed: ({ context }) => {
-      console.error(`[XState DEBUG] logErrorConnectionFailed: Attempting to log error: ${context.error}`);
-      // context.addTranscriptBreadcrumb(`[XState] Error: Connection failed. ${context.error}`);
+      console.error(`[XState] Connection failed: ${context.error}`);
+      context.addTranscriptBreadcrumb(`Error: Connection failed. ${context.error}`);
     },
     assignRtcEventHandlers: assign(({ context, self, system }) => {
       const { dc } = context;
       if (dc) {
-        console.log("[XState DEBUG] Assigning RTC event handlers to DC:", dc);
+        console.log("[XState] Setting up RTC event handlers");
         dc.onmessage = (event: MessageEvent) => {
           try {
             const serverMessage = JSON.parse(event.data);
             // If it's a direct agent transfer request, send a specific machine event
             if (serverMessage.type === 'session.transfer_agent.request' && serverMessage.agent_name) {
-              console.log('[XState DEBUG] dc.onmessage: Detected session.transfer_agent.request, sending SERVER_REQUESTED_AGENT_TRANSFER');
+              console.log('[XState] Detected agent transfer request:', serverMessage.agent_name);
               self.send({ type: 'SERVER_REQUESTED_AGENT_TRANSFER', agentName: serverMessage.agent_name });
             } else {
               // For other messages, send the generic RTC_SERVER_MESSAGE_RECEIVED
               self.send({ type: 'RTC_SERVER_MESSAGE_RECEIVED', serverMessage });
             }
           } catch (e) {
-            console.error("[XState DEBUG] Error parsing server message:", e);
+            console.error("[XState] Error parsing server message:", e);
           }
         };
         dc.onclose = () => {
-          console.log("[XState DEBUG] DC onclose triggered.");
+          console.log("[XState] Data channel closed");
           self.send({ type: 'RTC_DISCONNECTED', reason: 'dc_closed' });
         };
         dc.onerror = (event: Event) => {
-          console.error("[XState DEBUG] DC onerror triggered:", event);
+          console.error("[XState] Data channel error:", event);
           self.send({ type: 'RTC_CONNECTION_FAILED', error: (event as any)?.message || 'Unknown DC error' });
         };
       } else {
-        console.warn("[XState DEBUG] Attempted to assign RTC event handlers, but DC is null.");
+        console.warn("[XState] Cannot set up RTC event handlers - DC is null");
       }
       return {}; // No context change, just side effects
     }),
     clearRtcEventHandlers: assign(({ context }) => {
       const { dc } = context;
       if (dc) {
-        console.log("[XState DEBUG] Clearing RTC event handlers from DC:", dc);
+        console.log("[XState] Clearing RTC event handlers");
         dc.onmessage = null;
         dc.onclose = null;
         dc.onerror = null;
@@ -244,23 +244,22 @@ export const agentLifecycleMachine = setup({
       return {}; // No context change, just side effects
     }),
     processAndRelayServerMessage: ({ context, event }) => {
-      // Cast event to the correct type to access serverMessage
       const rtcEvent = event as Extract<AgentLifecycleMachineEvent, { type: 'RTC_SERVER_MESSAGE_RECEIVED' }>;
       const serverMessage = rtcEvent.serverMessage;
       
       const { eventBus } = context;
 
       if (!serverMessage || !serverMessage.type) {
-        console.warn('[XState Action - processAndRelayServerMessage] Received empty or typeless server message:', serverMessage);
+        console.warn('[XState] Received empty or typeless server message');
         return;
       }
 
-      console.log('[XState Action - processAndRelayServerMessage] Processing message type:', serverMessage.type, serverMessage);
+      console.log('[XState] Processing message:', serverMessage.type);
 
       // Handle user's completed speech transcription
       if (serverMessage.type === 'conversation.item.input_audio_transcription.completed') {
         if (serverMessage.item_id && typeof serverMessage.transcript === 'string') {
-          console.log(`[XState Action - processAndRelayServerMessage] User transcript completed: ID=${serverMessage.item_id}, Transcript="${serverMessage.transcript}"`);
+          console.log(`[XState] User transcript completed: "${serverMessage.transcript}"`);
           eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM, {
             idToAssign: serverMessage.item_id,
             role: 'user',
@@ -268,19 +267,17 @@ export const agentLifecycleMachine = setup({
             isLocal: true,
           });
           // Explicitly ask the server to create a response
-          console.log('[XState Action - processAndRelayServerMessage] Requesting agent response.');
+          console.log('[XState] Requesting agent response');
           eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
             eventObj: { type: "response.create" },
             eventNameSuffix: "response_create_after_user_transcript_completed_xstate"
           });
         } else {
-          console.warn('[XState Action - processAndRelayServerMessage] Malformed conversation.item.input_audio_transcription.completed:', serverMessage);
+          console.warn('[XState] Malformed conversation.item.input_audio_transcription.completed');
         }
       }
       // Handle assistant's completed message item
       else if (serverMessage.type === 'response.output_item.done' && serverMessage.item?.type === 'message' && serverMessage.item?.role === 'assistant') {
-        console.log('[XState Action - processAndRelayServerMessage] Received response.output_item.done. Full item:', JSON.stringify(serverMessage.item, null, 2));
-        
         let textContent: string | undefined = undefined;
         const firstContent = serverMessage.item.content?.[0];
 
@@ -292,51 +289,37 @@ export const agentLifecycleMachine = setup({
           }
         }
         
-        console.log('[XState Action - processAndRelayServerMessage] Extracted textContent:', textContent, '(Type:', typeof textContent + ')');
-        
         if (serverMessage.item.id && typeof textContent === 'string') {
-          console.log(`[XState Action - processAndRelayServerMessage] Assistant transcript item done: ID=${serverMessage.item.id}, Text="${textContent}"`);
+          console.log(`[XState] Assistant transcript complete: "${textContent.substring(0, 50)}${textContent.length > 50 ? '...' : ''}"`);
           eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM, {
             idToAssign: serverMessage.item.id,
             role: 'assistant',
             title: textContent,
           });
         } else {
-          console.warn('[XState Action - processAndRelayServerMessage] Malformed response.output_item.done for assistant message:', serverMessage);
+          console.warn('[XState] Malformed response.output_item.done for assistant message');
         }
       }
       // Handle output audio buffer status
       else if (serverMessage.type === 'output_audio_buffer.started') {
-        console.log('[XState Action - processAndRelayServerMessage] Output audio buffer started.');
+        console.log('[XState] Output audio buffer started');
         eventBus.emit(KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED, true);
       } else if (serverMessage.type === 'output_audio_buffer.stopped' || serverMessage.type === 'output_audio_buffer.done') {
-        console.log('[XState Action - processAndRelayServerMessage] Output audio buffer stopped/done.');
+        console.log('[XState] Output audio buffer stopped/done');
         eventBus.emit(KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED, false);
       }
-      // Log receivers when server indicates audio is done sending, to check for remote tracks
+      // Log receivers when server indicates audio is done sending
       else if (serverMessage.type === 'response.audio.done') {
-        console.log('[XState Action - processAndRelayServerMessage] Received response.audio.done. Current pc state:', context.pc?.connectionState);
-        if (context.pc && typeof context.pc.getReceivers === 'function') {
-          const receivers: RTCRtpReceiver[] = context.pc.getReceivers();
-          console.log('[XState Action - processAndRelayServerMessage] pc.getReceivers():', JSON.stringify(receivers.map((r: RTCRtpReceiver) => ({ track: r.track ? { id: r.track.id, kind: r.track.kind, readyState: r.track.readyState, enabled: r.track.enabled, muted: r.track.muted } : null, transport: r.transport ? 'exists' : 'null' })), null, 2));
-          receivers.forEach((receiver: RTCRtpReceiver, index: number) => {
-            if (receiver.track) {
-              console.log(`[XState Action - processAndRelayServerMessage] Receiver ${index} track details: ID=${receiver.track.id}, Kind=${receiver.track.kind}, ReadyState=${receiver.track.readyState}, Enabled=${receiver.track.enabled}, Muted=${receiver.track.muted}`);
-            }
-          });
-        } else {
-          console.log('[XState Action - processAndRelayServerMessage] context.pc or context.pc.getReceivers is not available.');
-        }
+        console.log('[XState] Audio response done');
       }
       // User actual speech VAD events (from server VAD)
       else if (serverMessage.type === 'input_audio_transcription.user_speech.started') {
-        console.log('[XState Action - processAndRelayServerMessage] User speech started (server VAD).');
+        console.log('[XState] User speech started (server VAD)');
         eventBus.emit(KatoEvents.USER_SPEECH_STARTED);
       } else if (serverMessage.type === 'input_audio_transcription.user_speech.stopped') {
-        console.log('[XState Action - processAndRelayServerMessage] User speech stopped (server VAD).');
+        console.log('[XState] User speech stopped (server VAD)');
         eventBus.emit(KatoEvents.USER_SPEECH_STOPPED);
       }
-      // Add more handlers here as needed for other KatoEvents, e.g., for partial transcripts, specific errors, etc.
     },
     assignAudioElement: assign(({
       context,
@@ -344,7 +327,7 @@ export const agentLifecycleMachine = setup({
     }) => {
       const specificEvent = event as SpecificEvent<'AUDIO_ELEMENT_READY'>;
       if (specificEvent.audioElement) {
-        console.log('[XState DEBUG] assignAudioElement: Updating audio element in context', specificEvent.audioElement);
+        console.log('[XState] Updated audio element in context');
         return {
           audioElement: specificEvent.audioElement
         };

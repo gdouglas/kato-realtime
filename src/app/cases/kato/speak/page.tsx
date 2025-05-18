@@ -110,28 +110,21 @@ function KatoSpeakPageContent() {
 
   useEffect(() => {
     if (contextDc) {
-      console.log('[SpeakPage] useEffect sync dcRef: contextDc is present. Assigning to dcRef.current.', contextDc);
+      console.log('[SpeakPage] Data channel from context assigned to reference');
       dcRef.current = contextDc;
-      if (dcRef.current) {
-        console.log('[SpeakPage] dcRef.current.readyState after assignment:', dcRef.current.readyState);
-      }
     } else {
-      console.log('[SpeakPage] useEffect sync dcRef: contextDc is null. Setting dcRef.current to null.');
       dcRef.current = null;
     }
   }, [contextDc]);
 
   useEffect(() => {
     const handleSendMessageToServer = (data: { eventObj: any, eventNameSuffix?: string }) => {
-      console.log('[SpeakPage] SEND_MESSAGE_TO_SERVER event received, data:', data);
       if (dcRef.current && dcRef.current.readyState === "open") {
         const messagePayload = JSON.stringify(data.eventObj);
-        console.log('[SpeakPage] Attempting to send message via dcRef.current.readyState:', dcRef.current.readyState, 'Payload:', messagePayload);
         logClientEvent(data.eventObj, data.eventNameSuffix); 
         dcRef.current.send(messagePayload);
       } else {
-        const errorMsg = `[SpeakPage] MESSAGE_SENT_TO_DC_ERROR_SPEAK: DC not open or not available. State: ${dcRef.current?.readyState}. Event: ${data.eventObj?.type}`;
-        console.error(errorMsg);
+        console.error(`[SpeakPage] Error: Data channel not open. Event: ${data.eventObj?.type}`);
         addTranscriptBreadcrumb("Error: Data channel not open.");
         logClientEvent({ attemptedEvent: data.eventObj?.type, error: "dc_not_open" }, `error.dc_not_open_for_${data.eventNameSuffix || 'unknown_event'}`);
       }
@@ -151,12 +144,12 @@ function KatoSpeakPageContent() {
 
   useEffect(() => {
     const handleAgentChangedPageLogic = (data?: { agentName?: string }) => { 
-      console.log(`[SpeakPage] CURRENT_AGENT_CHANGED event received. New agent: ${data?.agentName}. Resetting hasDoneInitialAgentSetupRef.`);
+      console.log(`[SpeakPage] Agent changed to: ${data?.agentName}`);
       hasDoneInitialAgentSetupRef.current = false;
     };
     const subChange = eventBus.on(KatoEvents.CURRENT_AGENT_CHANGED, handleAgentChangedPageLogic);
     return () => subChange();
-  }, [eventBus]); 
+  }, [eventBus]);
 
   useEffect(() => {
     const handleConnectionEstablished = () => addTranscriptBreadcrumb("Data channel open.");
@@ -448,11 +441,16 @@ function KatoSpeakPageContent() {
     if (sessionStatus === "CONNECTED" && currentAgentConfig && !hasDoneInitialAgentSetupRef.current) {
       addTranscriptBreadcrumb(`Agent ${currentAgentConfig.name} ready (Speak Page).`);
       
+      // Check if this agent's intro has already been played previously from the state machine
+      const hasIntroBeenPlayedBefore = agentLifecycle.state.context.playedAgentIntros.has(currentAgentConfig.name);
       const isCurrentlyAnIntroSequence = isIntroAudioPlaying;
       
-      const shouldTriggerAutomaticResponse = !isCurrentlyAnIntroSequence;
+      // Only trigger automatic response if:
+      // 1. No intro is currently playing AND
+      // 2. This agent's intro has already been played before (returning user/agent switch)
+      const shouldTriggerAutomaticResponse = !isCurrentlyAnIntroSequence && hasIntroBeenPlayedBefore;
 
-      console.log(`[SpeakPage] Initial Setup/Session Update: Agent: ${currentAgentConfig.name}, isIntroPlaying: ${isCurrentlyAnIntroSequence} => shouldTriggerHi: ${shouldTriggerAutomaticResponse}`);
+      console.log(`[SpeakPage] Initial Setup/Session Update: Agent: ${currentAgentConfig.name}, isIntroPlaying: ${isCurrentlyAnIntroSequence}, hasIntroBeenPlayedBefore: ${hasIntroBeenPlayedBefore} => shouldTriggerHi: ${shouldTriggerAutomaticResponse}`);
 
       eventBus.emit(KatoEvents.SESSION_UPDATE_REQUESTED, { 
         shouldTriggerResponse: shouldTriggerAutomaticResponse, 
@@ -461,7 +459,7 @@ function KatoSpeakPageContent() {
       
       hasDoneInitialAgentSetupRef.current = true;
     }
-  }, [sessionStatus, currentAgentConfig, eventBus, addTranscriptBreadcrumb, isIntroAudioPlaying]);
+  }, [sessionStatus, currentAgentConfig, eventBus, addTranscriptBreadcrumb, isIntroAudioPlaying, agentLifecycle.state.context.playedAgentIntros]);
 
   useEffect(() => { 
     if(sessionStatus === "CONNECTED" && currentAgentConfig && hasDoneInitialAgentSetupRef.current) {
@@ -530,11 +528,11 @@ function KatoSpeakPageContent() {
       audioElementRef.current = new Audio();
       audioElementRef.current.autoplay = true;
       audioElementRef.current.controls = true; // For debugging, remove in production
-      console.log('[SpeakPage] audioElementRef.current initialized:', audioElementRef.current);
+      console.log('[SpeakPage] Audio element initialized');
       
-      // Add this line to update the agent lifecycle machine with the new audio element
+      // Update the agent lifecycle machine with the new audio element
       if (agentLifecycle && agentLifecycle.send) {
-        console.log('[SpeakPage] Sending AUDIO_ELEMENT_READY event to state machine');
+        console.log('[SpeakPage] Sending audio element to state machine');
         agentLifecycle.send({ type: 'AUDIO_ELEMENT_READY', audioElement: audioElementRef.current });
       }
     }
@@ -542,12 +540,12 @@ function KatoSpeakPageContent() {
     // Cleanup function to pause and clear srcObject when the component unmounts.
     return () => {
       if (audioElementRef.current) {
-        console.log('[SpeakPage] Unmounting: Cleaning up audioElementRef. Pausing and nullifying srcObject.');
+        console.log('[SpeakPage] Cleaning up audio element on unmount');
         audioElementRef.current.pause();
         audioElementRef.current.srcObject = null;
       }
     };
-  }, []); // Empty dependency array ensures this runs only once on mount and unmount.
+  }, []);
 
   if (showIntroScreen) {
     return <KatoIntroScreen onStartWithPatient={handleStartWithPatient} onStartWithPreceptor={handleStartWithPreceptor} />;

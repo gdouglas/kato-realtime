@@ -32,17 +32,6 @@ import medicalHistoryTakingAgents from "@/app/agentConfigs/medicalHistoryTaking"
 // Define the base URL for your FastAPI backend
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
-import useAudioDownload from "./hooks/useAudioDownload";
-
-// Placeholder imports for UI components - adjust paths if necessary
-// import ChatMessage from "@/app/components/ChatMessage"; // Commented out: Component not found
-// import MicDeniedModal from "@/app/components/MicDeniedModal"; // Commented out: Component not found
-// import AgentProfile from "@/app/components/AgentProfile"; // Commented out: Component not found
-// import UserResponseSuggestion from "@/app/components/UserResponseSuggestion"; // Commented out: Component not found
-// import ChatInput from "@/app/components/ChatInput"; // Commented out: Component not found
-// import CallControls from "@/app/components/CallControls"; // Commented out: Component not found
-// import Debugger from "@/app/components/Debugger"; // Commented out: Component not found
-
 function AppContents() {
   const searchParams = useSearchParams();
   const agentLifecycle = useAgentLifecycle();
