@@ -16,6 +16,7 @@ interface AgentContextType {
   patientAgent: AgentConfig | null;
   preceptorAgent: AgentConfig | null;
   selectAgent: (agentName: string) => void;
+  isSwitchingInProgress: boolean;
   // Add other exports from useAgentManager if needed by pages
 }
 
@@ -32,6 +33,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     currentAgentConfig,
     patientAgent: pa, // rename to avoid conflict in destructuring if needed
     preceptorAgent: pra, // rename
+    isSwitchingInProgress, // Get from the hook
     // setSelectedAgentName, // Internal to the hook, exposed via selectAgent
   } = useOriginalAgentManagerHook({
     initialAgentConfigs: medicalHistoryTakingAgents,
@@ -52,6 +54,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       patientAgent: pa || null, // Ensure null if undefined
       preceptorAgent: pra || null, // Ensure null if undefined
       selectAgent,
+      isSwitchingInProgress, // Provide in context
     }}>
       {children}
     </AgentContext.Provider>

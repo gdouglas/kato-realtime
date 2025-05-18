@@ -51,4 +51,11 @@ export const KatoEvents = {
   // Client-Side Events (sent to server or for internal client communication)
   SEND_MESSAGE_TO_SERVER: 'SEND_MESSAGE_TO_SERVER', // data: { eventObj: any, eventNameSuffix?: string }
   SESSION_UPDATE_REQUESTED: 'SESSION_UPDATE_REQUESTED', // data?: { shouldTriggerResponse?: boolean }
+
+  // Agent Switching Lifecycle Events
+  AGENT_SWITCH_STARTED: 'AGENT_SWITCH_STARTED', // data: { newAgentName: string, oldAgentName?: string }
+  AGENT_SWITCH_COMPLETED: 'AGENT_SWITCH_COMPLETED', // data: { agentName: string, success: true }
+  AGENT_SWITCH_FAILED: 'AGENT_SWITCH_FAILED', // data: { agentName: string, success: false, error?: string }
+  PLAY_AGENT_INTRO_REQUESTED: 'PLAY_AGENT_INTRO_REQUESTED', // data: { agentConfig: AgentConfig }
+  AGENT_INTRO_PLAYBACK_COMPLETED: 'AGENT_INTRO_PLAYBACK_COMPLETED', // data: { agentName: string, playedSuccessfully: boolean, error?: string }
 }; 
