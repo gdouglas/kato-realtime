@@ -3,30 +3,28 @@
 import { useRef } from "react";
 import {
   ServerEvent,
-  SessionStatus,
   AgentConfig,
   GuardrailResultType,
 } from "@/app/types";
 import { useTranscript } from "@/app/contexts/TranscriptContext";
 import { useEvent } from "@/app/contexts/EventContext";
 import { runGuardrailClassifier } from "@/app/lib/callOai";
+import { AgentLifecycleMachineEvent } from "@/app/machines/katoAgentLifecycleMachine";
 
 export interface UseHandleServerEventParams {
-  setSessionStatus: (status: SessionStatus) => void;
   selectedAgentName: string;
   selectedAgentConfigSet: AgentConfig[] | null;
-  sendClientEvent: (eventObj: any, eventNameSuffix?: string) => void;
-  setSelectedAgentName: (name: string) => void;
+  logClientEvent: (eventObj: any, eventNameSuffix?: string) => void;
+  sendToMachine: (event: AgentLifecycleMachineEvent) => void;
   shouldForceResponse?: boolean;
   setIsOutputAudioBufferActive: (active: boolean) => void;
 }
 
 export function useHandleServerEvent({
-  setSessionStatus,
   selectedAgentName,
   selectedAgentConfigSet,
-  sendClientEvent,
-  setSelectedAgentName,
+  logClientEvent,
+  sendToMachine,
   setIsOutputAudioBufferActive,
 }: UseHandleServerEventParams) {
   const {
@@ -87,7 +85,7 @@ export function useHandleServerEvent({
         fnResult
       );
 
-      sendClientEvent({
+      logClientEvent({
         type: "conversation.item.create",
         item: {
           type: "function_call_output",
@@ -95,30 +93,26 @@ export function useHandleServerEvent({
           output: JSON.stringify(fnResult),
         },
       });
-      sendClientEvent({ type: "response.create" });
+      logClientEvent({ type: "response.create" });
     } else if (functionCallParams.name === "transferAgents") {
       const destinationAgent = args.destination_agent;
       const newAgentConfig =
         selectedAgentConfigSet?.find((a) => a.name === destinationAgent) ||
         null;
       if (newAgentConfig) {
-        setSelectedAgentName(destinationAgent);
+        sendToMachine({ type: 'SERVER_REQUESTED_AGENT_TRANSFER', agentName: destinationAgent });
         
-        // First clear any active audio buffers
-        sendClientEvent(
+        logClientEvent(
           { type: "output_audio_buffer.clear" },
           "(clear audio before voice change)"
         );
         
-        // Wait a moment to ensure audio is cleared
         setTimeout(() => {
-          // Update session with new agent's voice setting
           const voice = newAgentConfig.voice || "sage";
           const instructions = newAgentConfig.instructions || "";
           const tools = newAgentConfig.tools || [];
           
-          // Send session update to apply new voice
-          sendClientEvent({
+          logClientEvent({
             type: "session.update",
             session: {
               modalities: ["text", "audio"],
@@ -128,14 +122,14 @@ export function useHandleServerEvent({
               tools,
             }
           }, "(update after agent transfer)");
-        }, 300); // Small delay to ensure buffers are cleared
+        }, 300);
       }
       
       const functionCallOutput = {
         destination_agent: destinationAgent,
         did_transfer: !!newAgentConfig,
       };
-      sendClientEvent({
+      logClientEvent({
         type: "conversation.item.create",
         item: {
           type: "function_call_output",
@@ -154,7 +148,7 @@ export function useHandleServerEvent({
         simulatedResult
       );
 
-      sendClientEvent({
+      logClientEvent({
         type: "conversation.item.create",
         item: {
           type: "function_call_output",
@@ -162,7 +156,7 @@ export function useHandleServerEvent({
           output: JSON.stringify(simulatedResult),
         },
       });
-      sendClientEvent({ type: "response.create" });
+      logClientEvent({ type: "response.create" });
     }
   };
 
@@ -172,7 +166,6 @@ export function useHandleServerEvent({
     switch (serverEvent.type) {
       case "session.created": {
         if (serverEvent.session?.id) {
-          setSessionStatus("CONNECTED");
           addTranscriptBreadcrumb(
             `session.id: ${
               serverEvent.session.id

@@ -163,22 +163,23 @@ export function useAgentManager({
       const agentToProcess = currentAgentConfig;
       console.log(`[useAgentManager] Post-Activation Processing: Agent ${agentToProcess.name}.`);
 
+      // Post-Activation Processing: If intro is needed, request it. Otherwise, request connection.
       if (agentToProcess.introAudio?.text && !playedAgentIntros.has(agentToProcess.name)) {
-        console.log(`[useAgentManager] Post-Activation Processing: Intro needed for ${agentToProcess.name}. Emitting PLAY_AGENT_INTRO_REQUESTED.`);
+        console.log(`[useAgentManager] Post-Activation Processing: Intro needed for ${agentToProcess.name}. XState machine should handle this.`); // Modified log
         // addTranscriptBreadcrumb(`Playing intro for ${agentToProcess.publicDescription || agentToProcess.name}...`); // useIntroAudio will handle this
-        eventBus.emit(KatoEvents.PLAY_AGENT_INTRO_REQUESTED, { agentConfig: agentToProcess });
-        // Connection will be requested by the AGENT_INTRO_PLAYBACK_COMPLETED handler after intro
+        // eventBus.emit(KatoEvents.PLAY_AGENT_INTRO_REQUESTED, { agentConfig: agentToProcess }); // <--- COMMENT OUT
+        // Connection will be requested by the AGENT_INTRO_PLAYBACK_COMPLETED handler after intro (which is also now disabled for connection request)
       } else {
         let reason = "";
         if (!agentToProcess.introAudio?.text) {
           reason = "No intro text for agent.";
-          console.log(`[useAgentManager] Post-Activation Processing: ${reason} For ${agentToProcess.name}. Requesting connection.`);
+          console.log(`[useAgentManager] Post-Activation Processing: ${reason} For ${agentToProcess.name}. XState machine should handle connection.`);
         } else { // Implies intro already played
           reason = "Intro already played for agent.";
-          console.log(`[useAgentManager] Post-Activation Processing: ${reason} For ${agentToProcess.name}. Requesting connection.`);
+          console.log(`[useAgentManager] Post-Activation Processing: ${reason} For ${agentToProcess.name}. XState machine should handle connection.`);
         }
         // addTranscriptBreadcrumb(`Connecting with ${agentToProcess.publicDescription || agentToProcess.name}... (${reason})`);
-        _requestConnectionForCurrentAgent(agentToProcess); // Pass the correct, current config
+        // _requestConnectionForCurrentAgent(agentToProcess); // <--- COMMENTED OUT TO PREVENT INTERFERENCE
       }
     }
   }, [
@@ -204,8 +205,8 @@ export function useAgentManager({
         
         // Whether intro played, was skipped by useIntroAudio, or errored, proceed to connect for this agent.
         // currentAgentConfig in this closure will be fresh due to this useEffect's dependency array.
-        console.log(`[useAgentManager] Intro playback finished for ${data.agentName}. Requesting connection.`);
-        _requestConnectionForCurrentAgent(currentAgentConfig);
+        console.log(`[useAgentManager] Intro playback finished for ${data.agentName}. XState machine should now handle connection.`);
+        // _requestConnectionForCurrentAgent(currentAgentConfig); // <--- COMMENTED OUT TO PREVENT INTERFERENCE
       } else {
         console.warn("[useAgentManager] AGENT_INTRO_PLAYBACK_COMPLETED received for an unexpected agent, or switch not in progress, or currentAgentConfig mismatch.", { 
           data, 

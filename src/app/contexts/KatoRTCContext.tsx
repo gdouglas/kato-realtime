@@ -1,11 +1,12 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { SessionStatus, AgentConfig } from '@/app/types'; // Added AgentConfig for useIntroAudio dep
-import { useKatoRTC as useOriginalKatoRTCHook } from '@/app/hooks/useKatoRTC';
+import { SessionStatus, AgentConfig } from '@/app/types';
+// import { useKatoRTC as useOriginalKatoRTCHook } from '@/app/hooks/useKatoRTC'; // DELETED
 import { useEventBus } from './EventBusContext';
 import { KatoEvents } from '@/app/cases/kato/KatoEvents';
-import { v4 as uuidv4 } from "uuid"; // For createServerEventHandler
+import { v4 as uuidv4 } from "uuid"; 
+import { useAgentLifecycle } from './AgentLifecycleContext'; // Import XState hook
 
 // Add new KatoEvents (assuming they would be defined in KatoEvents.ts)
 // For the purpose of this edit, we'll just use string literals directly
@@ -14,7 +15,10 @@ const USER_SPEECH_STARTED_EVENT = 'USER_SPEECH_STARTED';
 const USER_SPEECH_STOPPED_EVENT = 'USER_SPEECH_STOPPED';
 const AGENT_RESPONSE_COMPLETED_EVENT = 'AGENT_RESPONSE_COMPLETED';
 
-// Define the server event handler function (similar to what was in page.tsx)
+// createServerEventHandler is problematic as it emits many events to eventBus directly.
+// The new flow: XState actor dc.onmessage -> RTC_SERVER_MESSAGE_RECEIVED event to machine -> App.tsx useEffect calls useHandleServerEvent.
+// So, this function as defined here might become largely unused if App.tsx's useHandleServerEvent is comprehensive.
+// For now, keeping it but noting its diminished role in the new architecture.
 const createServerEventHandler = (eventBus: ReturnType<typeof useEventBus>) => {
   return (serverMessage: any) => {
     eventBus.emit(KatoEvents.SERVER_MESSAGE_RECEIVED, serverMessage);
@@ -74,68 +78,73 @@ const createServerEventHandler = (eventBus: ReturnType<typeof useEventBus>) => {
 
 interface KatoRTCContextType {
   sessionStatus: SessionStatus;
-  dcRef: React.MutableRefObject<RTCDataChannel | null>;
-  manualDisconnect: boolean;
+  dcRef: React.MutableRefObject<RTCDataChannel | null>; // This will be a challenge as XState owns dc.
+  // manualDisconnect: boolean; // Removed
   isAudioPlaybackEnabled: boolean;
   setIsAudioPlaybackEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   connectKatoRTC: () => void;
   disconnectKatoRTC: (data?: {isSwitchingAgent?: boolean}) => void;
-  // To be added: currentAgentConfig for useIntroAudio dependency if not available elsewhere
 }
 
 const KatoRTCContext = createContext<KatoRTCContextType | undefined>(undefined);
 
 export const KatoRTCProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const eventBus = useEventBus();
+  const agentLifecycle = useAgentLifecycle(); // Use XState hook
+
+  // Get values from XState machine context
+  const xstateSessionStatus = agentLifecycle.state.context.sessionStatus;
+  const xstateDc = agentLifecycle.state.context.dc;
+
+  // Reconcile dcRef for context consumers. This is tricky because dc is not a RefObject here.
+  // For now, create a local ref that tries to mirror xstateDc. Consumers might need adjustment.
+  const localDcRef = useRef<RTCDataChannel | null>(null);
+  useEffect(() => {
+    localDcRef.current = xstateDc || null;
+  }, [xstateDc]);
+
+  // Local state for isAudioPlaybackEnabled, as before. Syncing with machine is a separate step.
   const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] = useState<boolean>(true);
-  const urlCodec = "opus"; // Or from env/config
+  // const urlCodec = "opus"; // No longer directly used to instantiate useKatoRTC hook here
 
-  // Memoize handleServerEvent based on eventBus
-  const handleServerEvent = useCallback(createServerEventHandler(eventBus), [eventBus]);
+  // const handleServerEvent = useCallback(createServerEventHandler(eventBus), [eventBus]); // No longer passed to a local hook call
 
-  const { sessionStatus, dcRef, manualDisconnect } = useOriginalKatoRTCHook({
-    isAudioPlaybackEnabled,
-    urlCodec,
-    handleServerEvent,
-  });
+  // The call to useOriginalKatoRTCHook is removed.
+  // const { sessionStatus, dcRef, manualDisconnect } = useOriginalKatoRTCHook(...);
 
   const connectKatoRTC = useCallback(() => {
-    // The actual connection logic is initiated by useKatoRTC via event bus events.
-    // This function is a placeholder if direct invocation is needed,
-    // but primarily, connection is triggered by USER_REQUESTED_CONNECT.
-    // We ensure the event is emitted.
-    console.log("[KatoRTCContext] connectKatoRTC called, emitting USER_REQUESTED_CONNECT");
-    eventBus.emit(KatoEvents.USER_REQUESTED_CONNECT);
-  }, [eventBus]);
+    console.log("[KatoRTCContext] connectKatoRTC called, sending RETRY to XState machine");
+    // This assumes an agent is already selected or machine handles RETRY from idle appropriately.
+    // If an agent needs to be explicitly selected first, this logic might need more context.
+    agentLifecycle.send({ type: 'RETRY' }); 
+  }, [agentLifecycle]);
 
   const disconnectKatoRTC = useCallback((data?: {isSwitchingAgent?: boolean}) => {
-    console.log("[KatoRTCContext] disconnectKatoRTC called, emitting USER_REQUESTED_DISCONNECT");
-    eventBus.emit(KatoEvents.USER_REQUESTED_DISCONNECT, data);
-  }, [eventBus]);
+    console.log("[KatoRTCContext] disconnectKatoRTC called, sending USER_REQUESTED_DISCONNECT to XState machine");
+    // The isSwitchingAgent payload from original call is not directly used when sending USER_REQUESTED_DISCONNECT.
+    // The machine handles switches based on SELECT_AGENT event leading to its internal disconnect/connect flow.
+    agentLifecycle.send({ type: 'USER_REQUESTED_DISCONNECT' });
+  }, [agentLifecycle]);
   
-  // Effect to tie local isAudioPlaybackEnabled state to the event bus system
   useEffect(() => {
     const handler = (enabled: boolean) => setIsAudioPlaybackEnabled(enabled);
     const sub = eventBus.on(KatoEvents.AUDIO_PLAYBACK_ENABLED_CHANGED, handler);
     return () => sub();
   }, [eventBus]);
 
-
   return (
     <KatoRTCContext.Provider value={{
-      sessionStatus,
-      dcRef,
-      manualDisconnect,
+      sessionStatus: xstateSessionStatus as SessionStatus, // Cast if XState status is slightly different but compatible
+      dcRef: localDcRef, // Provide the local ref that mirrors XState's dc
+      // manualDisconnect, // Removed
       isAudioPlaybackEnabled,
       setIsAudioPlaybackEnabled: (valueOrFn) => {
-          // When setIsAudioPlaybackEnabled is called, also emit an event
-          // so other parts of the system (like page UI) can react if needed,
-          // and the state in useKatoRTC is updated via its own subscription.
           const newValue = typeof valueOrFn === 'function' 
             ? (valueOrFn as (prevState: boolean) => boolean)(isAudioPlaybackEnabled) 
             : valueOrFn;
           eventBus.emit(KatoEvents.AUDIO_PLAYBACK_ENABLED_CHANGED, newValue);
-          // The local state will update via the useEffect subscription above.
+          // Consider sending an event to XState machine here if it needs to know about this change.
+          // agentLifecycle.send({ type: 'SET_AUDIO_PLAYBACK_ENABLED', enabled: newValue });
       },
       connectKatoRTC,
       disconnectKatoRTC,

@@ -7,33 +7,29 @@ import { LuWifiOff, LuLoader, LuInfo } from "react-icons/lu";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 
+// Contexts and Hooks
+import { useAgentContext } from '@/app/contexts/AgentContext';
+import { TranscriptProvider, useTranscript } from "@/app/contexts/TranscriptContext";
+import { EventProvider, useEvent } from "@/app/contexts/EventContext";
+import { useEventBus, EventBusProvider } from "@/app/contexts/EventBusContext";
+import { useIntroAudio } from '@/app/hooks/useIntroAudio';
+import { useAgentLifecycle } from '@/app/contexts/AgentLifecycleContext';
+import useAudioDownload from "@/app/hooks/useAudioDownload";
+
+// Libs and Types
+import { EventBus } from '@/app/lib/eventBus';
+import { AgentConfig, SessionStatus } from '@/app/types';
+import { KatoEvents } from '@/app/cases/kato/KatoEvents';
+
 // UI components
-// import Transcript from "@/app/components/Transcript"; // Not used directly in speak page
 import KatoIntroScreen from "@/app/components/KatoIntroScreen";
 import CaseInfoModal from "@/app/components/CaseInfoModal";
 
-// Types
-import { AgentConfig, SessionStatus } from "@/app/types";
-
-// Context providers & hooks
-import { TranscriptProvider, useTranscript } from "@/app/contexts/TranscriptContext";
-import { EventProvider, useEvent } from "@/app/contexts/EventContext";
-import { useEventBus, EventBusProvider } from "@/app/contexts/EventBusContext"; 
-
-// Utilities
+// Utilities & Case Data
 import { katoCaseDetails } from "@/app/cases/kato/katoCaseData";
-import { KatoEvents } from "@/app/cases/kato/KatoEvents";
 
 // Specific Agent config
 import medicalHistoryTakingAgents from "@/app/agentConfigs/medicalHistoryTaking";
-
-// Hooks
-import useAudioDownload from "@/app/hooks/useAudioDownload";
-import { useIntroAudio } from "@/app/hooks/useIntroAudio";
-
-// NEW CONTEXT HOOKS
-import { useKatoRTCContext } from "@/app/contexts/KatoRTCContext";
-import { useAgentContext } from "@/app/contexts/AgentContext";
 
 // KatoPageLayout is not used; layout is inline
 
@@ -50,21 +46,26 @@ function KatoSpeakPageContent() {
   const { addTranscriptMessage, addTranscriptBreadcrumb } = useTranscript();
   const { logClientEvent } = useEvent();
 
+  const agentLifecycle = useAgentLifecycle();
   const { 
-    sessionStatus, 
-    dcRef, 
-    manualDisconnect, 
-    isAudioPlaybackEnabled, 
-    setIsAudioPlaybackEnabled,
-  } = useKatoRTCContext();
+    sessionStatus,
+    dc: contextDc,
+    currentAgentConfig,
+    isAudioPlaybackEnabled,
+    error: lifecycleError,
+    lastServerMessage,
+    logServerEvent: contextLogServerEvent,
+    addTranscriptBreadcrumb: contextAddTranscriptBreadcrumb,
+    eventBus: contextEventBus,
+    urlCodec: contextUrlCodec
+  } = agentLifecycle.state.context;
 
   const { 
     selectedAgentName, 
-    currentAgentConfig, 
     patientAgent,
     preceptorAgent,
-    selectAgent, // Function to request agent change
-    isSwitchingInProgress, // New state from context
+    selectAgent,
+    isSwitchingInProgress,
   } = useAgentContext();
 
   const urlCodec = "opus";
@@ -72,7 +73,7 @@ function KatoSpeakPageContent() {
   const [showIntroScreen, setShowIntroScreen] = useState<boolean>(true);
   const [isCaseInfoModalOpen, setIsCaseInfoModalOpen] = useState<boolean>(false);
 
-  const audioElementRef = useRef<HTMLAudioElement | null>(null); 
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const [isPTTActive, setIsPTTActive] = useState<boolean>(false);
   const [currentAudioInputMode, setCurrentAudioInputMode] = useState<"conversation" | "ptt" | "no_mic">("conversation");
   const [isPTTUserSpeaking, setIsPTTUserSpeaking] = useState<boolean>(false);
@@ -92,10 +93,9 @@ function KatoSpeakPageContent() {
 
   const hasDoneInitialAgentSetupRef = useRef<boolean>(false);
 
-  // useIntroAudio hook is now simpler, only provides isIntroAudioPlaying and listens for PLAY_AGENT_INTRO_REQUESTED
   const { isIntroAudioPlaying } = useIntroAudio({ addTranscriptBreadcrumb });
 
-  const introButtonClickedRef = useRef(false); // Still useful for initial screen choice
+  const introButtonClickedRef = useRef(false);
 
   const indicatorLineRefCallback = useCallback((node: HTMLDivElement | null) => {
     if (node) {
@@ -106,6 +106,40 @@ function KatoSpeakPageContent() {
     }
   }, []);
 
+  const dcRef = useRef<RTCDataChannel | null>(null);
+
+  useEffect(() => {
+    if (contextDc) {
+      console.log('[SpeakPage] useEffect sync dcRef: contextDc is present. Assigning to dcRef.current.', contextDc);
+      dcRef.current = contextDc;
+      if (dcRef.current) {
+        console.log('[SpeakPage] dcRef.current.readyState after assignment:', dcRef.current.readyState);
+      }
+    } else {
+      console.log('[SpeakPage] useEffect sync dcRef: contextDc is null. Setting dcRef.current to null.');
+      dcRef.current = null;
+    }
+  }, [contextDc]);
+
+  useEffect(() => {
+    const handleSendMessageToServer = (data: { eventObj: any, eventNameSuffix?: string }) => {
+      console.log('[SpeakPage] SEND_MESSAGE_TO_SERVER event received, data:', data);
+      if (dcRef.current && dcRef.current.readyState === "open") {
+        const messagePayload = JSON.stringify(data.eventObj);
+        console.log('[SpeakPage] Attempting to send message via dcRef.current.readyState:', dcRef.current.readyState, 'Payload:', messagePayload);
+        logClientEvent(data.eventObj, data.eventNameSuffix); 
+        dcRef.current.send(messagePayload);
+      } else {
+        const errorMsg = `[SpeakPage] MESSAGE_SENT_TO_DC_ERROR_SPEAK: DC not open or not available. State: ${dcRef.current?.readyState}. Event: ${data.eventObj?.type}`;
+        console.error(errorMsg);
+        addTranscriptBreadcrumb("Error: Data channel not open.");
+        logClientEvent({ attemptedEvent: data.eventObj?.type, error: "dc_not_open" }, `error.dc_not_open_for_${data.eventNameSuffix || 'unknown_event'}`);
+      }
+    };
+    const unsubscribe = eventBus.on(KatoEvents.SEND_MESSAGE_TO_SERVER, handleSendMessageToServer);
+    return () => unsubscribe();
+  }, [eventBus, dcRef, logClientEvent, addTranscriptBreadcrumb]);
+
   useEffect(() => {
     if (selectedAgentName) {
       setShowIntroScreen(false);
@@ -115,27 +149,23 @@ function KatoSpeakPageContent() {
     }
   }, [selectedAgentName]);
 
-  // Effect for when current agent changes (e.g. after successful switch)
   useEffect(() => {
     const handleAgentChangedPageLogic = (data?: { agentName?: string }) => { 
       console.log(`[SpeakPage] CURRENT_AGENT_CHANGED event received. New agent: ${data?.agentName}. Resetting hasDoneInitialAgentSetupRef.`);
-      hasDoneInitialAgentSetupRef.current = false; // Reset for the new agent
+      hasDoneInitialAgentSetupRef.current = false;
     };
     const subChange = eventBus.on(KatoEvents.CURRENT_AGENT_CHANGED, handleAgentChangedPageLogic);
     return () => subChange();
   }, [eventBus]); 
 
-  // Effects for connection status breadcrumbs (mostly unchanged, but review dependencies)
   useEffect(() => {
     const handleConnectionEstablished = () => addTranscriptBreadcrumb("Data channel open.");
     const handleConnectionFailed = (error: Error) => {
       addTranscriptBreadcrumb(`Error connecting: ${error.message}`);
-      // Session status is now managed by KatoRTCContext based on its own events and useKatoRTC hook
     };
     const handleDataChannelStatus = (status: 'open' | 'closed' | 'error') => {
         if (status === 'closed') addTranscriptBreadcrumb("Data channel closed.");
         if (status === 'error') addTranscriptBreadcrumb("Data channel error.");
-        // Let KatoRTCContext handle session status changes based on DC status
     };
     const subEst = eventBus.on(KatoEvents.CONNECTION_ESTABLISHED, handleConnectionEstablished);
     const subFail = eventBus.on(KatoEvents.CONNECTION_FAILED, handleConnectionFailed);
@@ -143,7 +173,6 @@ function KatoSpeakPageContent() {
     return () => { subEst(); subFail(); subDc(); };
   }, [eventBus, addTranscriptBreadcrumb]); 
 
-  // Effect to perform session.update when requested
   useEffect(() => {
     const performUpdateSession = (data?: { 
       shouldTriggerResponse?: boolean; 
@@ -151,7 +180,6 @@ function KatoSpeakPageContent() {
     }) => {
         if (!currentAgentConfig) return;
         
-        // Clear input audio buffer (still relevant)
         eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
             eventObj: { type: "input_audio_buffer.clear" },
             eventNameSuffix: "clear audio buffer on session update (speak page)"
@@ -209,7 +237,7 @@ function KatoSpeakPageContent() {
     }
   }, [eventBus, isOutputAudioBufferActive]);
 
-  useEffect(() => { // For receiving server messages to transcript
+  useEffect(() => {
     const handleServerTranscript = (data: { idToAssign: string, role: 'user' | 'assistant', title: string, isLocal?: boolean}) => {
         addTranscriptMessage(data.idToAssign, data.role, data.title, data.isLocal);
     };
@@ -218,24 +246,42 @@ function KatoSpeakPageContent() {
   }, [eventBus, addTranscriptMessage]);
 
   useEffect(() => {
-    const handleOutputBufferStatusChanged = (isActive: boolean) => setIsOutputAudioBufferActive(isActive);
+    const handleOutputBufferStatusChanged = (isActive: boolean) => {
+      setIsOutputAudioBufferActive(isActive);
+      if (isActive) {
+        console.log('[SpeakPage] Event: OUTPUT_AUDIO_BUFFER_STATUS_CHANGED - Active. isAudioPlaybackEnabled:', isAudioPlaybackEnabled);
+        if (audioElementRef.current) {
+          console.log('[SpeakPage] audioElementRef.current state: paused:', audioElementRef.current.paused, ', muted:', audioElementRef.current.muted, ', volume:', audioElementRef.current.volume, ', srcObject:', audioElementRef.current.srcObject);
+          if (isAudioPlaybackEnabled && audioElementRef.current.paused && audioElementRef.current.srcObject) {
+            console.log('[SpeakPage] Attempting to play audioElement due to output buffer active and playback enabled.');
+            audioElementRef.current.play().catch(e => console.error('[SpeakPage] Error trying to play audio on output buffer active:', e));
+          }
+        } else {
+          console.warn('[SpeakPage] Event: OUTPUT_AUDIO_BUFFER_STATUS_CHANGED - Active, but audioElementRef.current is null.');
+        }
+      } else {
+        console.log('[SpeakPage] Event: OUTPUT_AUDIO_BUFFER_STATUS_CHANGED - Inactive.');
+        if (audioElementRef.current && !audioElementRef.current.paused) {
+            audioElementRef.current.pause();
+            console.log('[SpeakPage] Paused audio due to output buffer inactive.');
+        }
+      }
+    };
     const sub = eventBus.on(KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED, handleOutputBufferStatusChanged);
     return () => sub();
-  }, [eventBus]);
+  }, [eventBus, isAudioPlaybackEnabled]);
 
-  useEffect(() => { // Audio Interaction Modal
+  useEffect(() => {
     const handleVisibilityChange = (isVisible: boolean) => setShowAudioInteractionModal(isVisible);
     const subVisibility = eventBus.on(KatoEvents.AUDIO_MODAL_VISIBILITY_CHANGED, handleVisibilityChange);
     const handleUserConfirmation = () => {
       setShowAudioInteractionModal(false);
-      // No longer emitting USER_CONFIRMED_AUDIO_MODAL here to trigger connection, 
-      // as useIntroAudio/useAgentManager handles the flow after modal confirmation if it was related to intro playback.
     };
     const subConfirmation = eventBus.on(KatoEvents.USER_CONFIRMED_AUDIO_MODAL, handleUserConfirmation);
     return () => { subVisibility(); subConfirmation(); };
   }, [eventBus]);
 
-  useEffect(() => { // PTT Speaking State
+  useEffect(() => {
     const handleTalkStart = () => setIsPTTUserSpeaking(true);
     const handleTalkEnd = () => setIsPTTUserSpeaking(false);
     const subStart = eventBus.on(KatoEvents.USER_REQUESTED_TALK_START, handleTalkStart);
@@ -243,23 +289,34 @@ function KatoSpeakPageContent() {
     return () => { subStart(); subEnd(); };
   }, [eventBus]);
 
-  // Simplified onToggleConnection - relies on KatoRTCContext for connect/disconnect events
   const onToggleConnection = useCallback(() => {
-    if (sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING") {
-      eventBus.emit(KatoEvents.USER_REQUESTED_DISCONNECT);
+    console.log(`[SpeakPage] onToggleConnection called. SessionStatus: ${sessionStatus}, XState status: ${agentLifecycle.state.value}, Current Agent: ${currentAgentConfig?.name}`);
+    if (sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING" || agentLifecycle.state.matches('agentActive')) {
+      console.log("[SpeakPage] Sending USER_REQUESTED_DISCONNECT to XState machine.");
+      agentLifecycle.send({ type: 'USER_REQUESTED_DISCONNECT' });
     } else {
-      if (currentAgentConfig) { 
-        eventBus.emit(KatoEvents.USER_REQUESTED_CONNECT);
+      if (agentLifecycle.state.matches('idle')) {
+        if (currentAgentConfig && currentAgentConfig.name) {
+          console.log(`[SpeakPage] Machine is idle and agent ${currentAgentConfig.name} is selected. Sending SELECT_AGENT.`);
+          agentLifecycle.send({ type: 'SELECT_AGENT', agentName: currentAgentConfig.name });
+        } else {
+          console.warn("[SpeakPage] Machine is idle but no current agent config to select. Doing nothing.");
+        }
+      } else if (agentLifecycle.state.matches('connectionError') || 
+                 agentLifecycle.state.matches('errorIntroFailed') || 
+                 agentLifecycle.state.matches('switchError')) {
+        console.log(`[SpeakPage] Machine is in error state (${agentLifecycle.state.value}). Sending RETRY.`);
+        agentLifecycle.send({ type: 'RETRY' });
       } else {
-        addTranscriptBreadcrumb("Please select an agent before connecting.");
+        console.warn(`[SpeakPage] onToggleConnection: In unhandled state for connection attempt. Status: ${sessionStatus}, XState: ${agentLifecycle.state.value}. Sending RETRY as fallback.`);
+        agentLifecycle.send({ type: 'RETRY' }); 
       }
     }
-  }, [eventBus, sessionStatus, currentAgentConfig, addTranscriptBreadcrumb]);
+  }, [sessionStatus, agentLifecycle, currentAgentConfig]);
 
-  // Simplified agent selection - just calls selectAgent from context
   const handleAvatarAgentSelect = useCallback((newAgentName: string) => {
     console.log(`[SpeakPage] User clicked to switch to agent: ${newAgentName}`);
-    selectAgent(newAgentName); // selectAgent is from useAgentContext, it emits USER_SELECTED_AGENT
+    selectAgent(newAgentName);
   }, [selectAgent]);
 
   useEffect(() => {
@@ -284,12 +341,11 @@ function KatoSpeakPageContent() {
   const handleCreateDDx = useCallback(() => {
     if (sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING") {
       addTranscriptBreadcrumb("Disconnecting session before navigating to DDx page...");
-      eventBus.emit(KatoEvents.USER_REQUESTED_DISCONNECT, {isSwitchingAgent: false}); 
+      agentLifecycle.send({ type: 'USER_REQUESTED_DISCONNECT' });
     }
     router.push('/cases/kato/ddx');
-  }, [router, sessionStatus, eventBus, addTranscriptBreadcrumb]);
+  }, [router, sessionStatus, agentLifecycle, addTranscriptBreadcrumb]);
 
-  // Effect for indicator line positioning (unchanged)
   useEffect(() => { 
     const calculatePositions = () => {
       const parentEl = linePositioningParentRef.current;
@@ -330,7 +386,6 @@ function KatoSpeakPageContent() {
     }
   }, [currentAgentConfig, patientAgent, preceptorAgent, showIntroScreen, sessionStatus, isLineRefReady]);
 
-  // User speech events (unchanged)
   useEffect(() => {
     const handleUserSpeechStarted = () => setIsUserActuallySpeaking(true);
     const handleUserSpeechStopped = () => setIsUserActuallySpeaking(false);
@@ -342,7 +397,6 @@ function KatoSpeakPageContent() {
     };
   }, [eventBus]);
 
-  // Active speaker turn logic (mostly unchanged, relies on isIntroAudioPlaying from useIntroAudio)
   useEffect(() => {
     let newTurn: 'user' | 'patient' | 'preceptor' | 'none' = 'none';
     if (isIntroAudioPlaying) {
@@ -366,7 +420,6 @@ function KatoSpeakPageContent() {
     preceptorAgent
   ]);
 
-  // PTT Active State (unchanged)
   useEffect(() => {
     const handleAudioInputModeChange = (newMode: 'conversation' | 'ptt' | 'no_mic') => {
       setIsPTTActive(newMode === 'ptt');
@@ -376,51 +429,27 @@ function KatoSpeakPageContent() {
     return () => sub();
   }, [eventBus, currentAudioInputMode]);
 
-  // Audio Input Mode (unchanged)
   useEffect(() => {
     const handleAudioInputModeChange = (newMode: "conversation" | "ptt" | "no_mic") => setCurrentAudioInputMode(newMode);
     const sub = eventBus.on(KatoEvents.AUDIO_INPUT_MODE_CHANGED, handleAudioInputModeChange);
     return () => sub();
   }, [eventBus]);
 
-  // Audio Playback Enabled (unchanged)
   useEffect(() => {
     const handleAudioPlaybackEnabledChange = (isEnabled: boolean) => {
-      setIsAudioPlaybackEnabled(isEnabled);
-      if (audioElementRef.current) audioElementRef.current.autoplay = isEnabled;
+      console.log(`[SpeakPage] Audio playback toggled: ${isEnabled}`);
+      eventBus.emit(KatoEvents.AUDIO_PLAYBACK_ENABLED_CHANGED, isEnabled);
     };
     const sub = eventBus.on(KatoEvents.AUDIO_PLAYBACK_ENABLED_CHANGED, handleAudioPlaybackEnabledChange);
     return () => sub();
-  }, [eventBus, setIsAudioPlaybackEnabled]); // Added setIsAudioPlaybackEnabled from context
+  }, [eventBus]);
 
-  // SEND_MESSAGE_TO_SERVER Handler (unchanged)
-  useEffect(() => {
-    const handleSendMessageToServer = (data: { eventObj: any, eventNameSuffix?: string }) => {
-      if (dcRef.current && dcRef.current.readyState === "open") {
-        const messagePayload = JSON.stringify(data.eventObj);
-        logClientEvent(data.eventObj, data.eventNameSuffix); 
-        dcRef.current.send(messagePayload);
-      } else {
-        console.error(`[MESSAGE_SENT_TO_DC_ERROR_SPEAK] DC not open. Event: ${data.eventObj.type}`);
-        addTranscriptBreadcrumb("Error: Data channel not open.");
-        logClientEvent({ attemptedEvent: data.eventObj.type, error: "dc_not_open" }, `error.dc_not_open_for_${data.eventNameSuffix || 'unknown_event'}`);
-      }
-    };
-    const unsubscribe = eventBus.on(KatoEvents.SEND_MESSAGE_TO_SERVER, handleSendMessageToServer);
-    return () => unsubscribe();
-  }, [eventBus, dcRef, logClientEvent, addTranscriptBreadcrumb]);
-
-  // Revised Initial Session Update / Session Update on setting changes
   useEffect(() => {
     if (sessionStatus === "CONNECTED" && currentAgentConfig && !hasDoneInitialAgentSetupRef.current) {
       addTranscriptBreadcrumb(`Agent ${currentAgentConfig.name} ready (Speak Page).`);
       
-      // Determine if this connection is part of an intro sequence.
-      // isIntroAudioPlaying from useIntroAudio is the primary indicator now.
       const isCurrentlyAnIntroSequence = isIntroAudioPlaying;
       
-      // Trigger a response ("Hi") only if NOT an intro and NOT the very first connection for this agent setup cycle.
-      // hasDoneInitialAgentSetupRef helps track if we've done this for the current agent activation.
       const shouldTriggerAutomaticResponse = !isCurrentlyAnIntroSequence;
 
       console.log(`[SpeakPage] Initial Setup/Session Update: Agent: ${currentAgentConfig.name}, isIntroPlaying: ${isCurrentlyAnIntroSequence} => shouldTriggerHi: ${shouldTriggerAutomaticResponse}`);
@@ -434,58 +463,117 @@ function KatoSpeakPageContent() {
     }
   }, [sessionStatus, currentAgentConfig, eventBus, addTranscriptBreadcrumb, isIntroAudioPlaying]);
 
-  // Effect for Audio Settings Change (PTT/VAD)
   useEffect(() => { 
     if(sessionStatus === "CONNECTED" && currentAgentConfig && hasDoneInitialAgentSetupRef.current) {
-        // Only send a session update if we are already connected and initial setup was done.
-        // Avoids sending session.update before the very first one after connection.
         console.log("[SpeakPage] Audio settings changed (PTT/VAD), requesting session update.");
         eventBus.emit(KatoEvents.SESSION_UPDATE_REQUESTED, { 
-            shouldTriggerResponse: false, // Usually don't need a "Hi" for just a mode toggle
-            isIntroSequence: isIntroAudioPlaying // Reflect current intro state
+            shouldTriggerResponse: false,
+            isIntroSequence: isIntroAudioPlaying
         });
     }
   }, [isPTTActive, currentAudioInputMode, sessionStatus, eventBus, currentAgentConfig, isIntroAudioPlaying]);
 
-  // Mic Denied Modal (unchanged)
   useEffect(() => {
     const showModal = () => setShowMicDeniedModal(true);
     const sub = eventBus.on(KatoEvents.SHOW_MIC_DENIED_MODAL_REQUESTED, showModal);
     return () => sub();
   }, [eventBus]);
 
-  // Removed AGENT_INTRO_STARTED and AGENT_INTRO_FINISHED effects as this specific page doesn't need to manage playedAgentIntros directly.
-  // isIntroAudioPlaying from useIntroAudio is the source of truth for UI reactions.
-
-  // Removed POST_DISCONNECT_CONNECT_LOGIC effect - handled by useAgentManager
-  // Removed NO_INTRO_CONNECT_TRIGGER effect - handled by useAgentManager & useIntroAudio
-
   const isDisconnectedOrErrorState = sessionStatus === "DISCONNECTED" || sessionStatus === "ERROR";
+  const isIdle = agentLifecycle.state.matches('idle');
 
   const handleStartWithPatient = () => {
     introButtonClickedRef.current = true;
     console.log(`[SpeakPage] User selected Start With Patient.`);
     selectAgent("mrKato");
-    // setShowIntroScreen(false); // This is handled by useEffect on selectedAgentName
   };
 
   const handleStartWithPreceptor = () => {
     introButtonClickedRef.current = true;
     console.log(`[SpeakPage] User selected Start With Preceptor.`);
     selectAgent("preceptor");
-    // setShowIntroScreen(false); // This is handled by useEffect on selectedAgentName
   };
+
+  const createServerEventHandler = useCallback(( 
+    eventBus: EventBus, 
+    audioElement: HTMLAudioElement | null, 
+    urlCodec: string, 
+    agentConfig: AgentConfig | null | undefined, 
+    addTranscriptBreadcrumb: (message: string) => void,
+    logServerEvent: (eventObj: any, eventNameSuffix?: string) => void, 
+    isSwitching: boolean
+  ) => {
+    return (serverMessage: any) => {
+      console.log('[SpeakPage] createServerEventHandler received message:', serverMessage, { agentName: agentConfig?.name, isSwitching });
+      logServerEvent(serverMessage, `handler_received_${serverMessage?.type || 'unknown'}`);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (lastServerMessage) {
+      console.log('[SpeakPage] useEffect lastServerMessage: Detected new server message:', lastServerMessage);
+      const eventHandler = createServerEventHandler(
+        contextEventBus, 
+        audioElementRef.current, 
+        contextUrlCodec, 
+        currentAgentConfig, 
+        contextAddTranscriptBreadcrumb, 
+        contextLogServerEvent, 
+        false
+      ); 
+      eventHandler(lastServerMessage);
+    }
+  }, [lastServerMessage, createServerEventHandler, contextEventBus, contextUrlCodec, currentAgentConfig, contextAddTranscriptBreadcrumb, contextLogServerEvent]);
+
+  useEffect(() => {
+    if (!audioElementRef.current) {
+      audioElementRef.current = new Audio();
+      audioElementRef.current.autoplay = true;
+      audioElementRef.current.controls = true; // For debugging, remove in production
+      console.log('[SpeakPage] audioElementRef.current initialized:', audioElementRef.current);
+      
+      // Add this line to update the agent lifecycle machine with the new audio element
+      if (agentLifecycle && agentLifecycle.send) {
+        console.log('[SpeakPage] Sending AUDIO_ELEMENT_READY event to state machine');
+        agentLifecycle.send({ type: 'AUDIO_ELEMENT_READY', audioElement: audioElementRef.current });
+      }
+    }
+
+    // Cleanup function to pause and clear srcObject when the component unmounts.
+    return () => {
+      if (audioElementRef.current) {
+        console.log('[SpeakPage] Unmounting: Cleaning up audioElementRef. Pausing and nullifying srcObject.');
+        audioElementRef.current.pause();
+        audioElementRef.current.srcObject = null;
+      }
+    };
+  }, []); // Empty dependency array ensures this runs only once on mount and unmount.
 
   if (showIntroScreen) {
     return <KatoIntroScreen onStartWithPatient={handleStartWithPatient} onStartWithPreceptor={handleStartWithPreceptor} />;
   }
 
-  // Determine if agent switchers should be disabled
   const disableAgentSwitchers = isIntroAudioPlaying || isSwitchingInProgress;
+
+  const ConnectionStatusIndicator: React.FC = () => {
+    return (
+      <div className="flex items-center text-sm font-medium">
+        Status:
+        {isSwitchingInProgress && <span className="ml-2 text-blue-600">Switching agent...</span>}
+        {!isSwitchingInProgress && (
+          <>
+            {sessionStatus === "CONNECTED" && <span className="ml-2 text-green-600">(Connected)</span>}
+            {sessionStatus === "CONNECTING" && <span className="ml-2 text-yellow-600">(Connecting...)</span>}
+            {isDisconnectedOrErrorState && isIdle && selectedAgentName && <span className="ml-2 text-gray-500">(Disconnected)</span>}
+            {sessionStatus === "ERROR" && <span className="ml-2 text-red-600">(Error)</span>}            
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="text-base flex flex-col h-screen bg-gray-100 text-gray-800 relative">
-      {/* Header */}
       <div className="p-4 text-lg font-semibold flex justify-between items-center border-b bg-white shadow-sm">
         <div className="flex items-center">
           <Image src="/logos/UBC-crest-blue.png" alt="UBC Logo" width={48} height={48} className="mr-3"/>
@@ -504,17 +592,17 @@ function KatoSpeakPageContent() {
           {currentAgentConfig ? (
             <>
               <span className="font-medium">{currentAgentConfig.publicDescription}</span>
-              {sessionStatus === "CONNECTED" && <span className="ml-2 text-green-600">(Connected)</span>}
-              {sessionStatus === "CONNECTING" && <span className="ml-2 text-yellow-600">(Connecting...)</span>}
-              {isDisconnectedOrErrorState && !manualDisconnect && selectedAgentName && <span className="ml-2 text-gray-500">(Disconnected)</span>}
-              {manualDisconnect && <span className="ml-2 text-red-600">(Manually Disconnected)</span>}
-              {isSwitchingInProgress && <span className="ml-2 text-blue-600">(Switching agent...)</span>}
+              <ConnectionStatusIndicator />
+              {lifecycleError && (
+                <div className="mt-1 text-xs text-red-700 bg-red-100 p-2 rounded shadow">
+                  <strong>Machine Error:</strong> {typeof lifecycleError === 'string' ? lifecycleError : JSON.stringify(lifecycleError)}
+                </div>
+              )}
             </>
           ) : "No agent selected"}
         </div>
       </div>
 
-      {/* Main Content - Avatar UI Only */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 overflow-y-auto">
         {showMicDeniedModal && (
           <div className="absolute inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50 p-4">
@@ -538,7 +626,6 @@ function KatoSpeakPageContent() {
           </div>
         )}
 
-        {/* Avatar UI */}
         <div className="flex flex-col items-center justify-center gap-8 w-full max-w-3xl relative h-full">
           <div ref={linePositioningParentRef} className="relative flex justify-around w-full items-start mt-8">
             <div className="flex flex-col items-center text-center w-1/3"> 
@@ -583,7 +670,6 @@ function KatoSpeakPageContent() {
             </div>
           </div>
           <div className="mt-12">
-            {/* PTT Button or Switch to PTT Button - UI logic based on isPTTActive, sessionStatus */}
             {isPTTActive ? (
               <button onMouseDown={handleTalkButtonDown} onMouseUp={handleTalkButtonUp} onTouchStart={handleTalkButtonDown} onTouchEnd={handleTalkButtonUp}
                 className={`px-10 py-5 rounded-full text-white text-xl font-semibold transition-colors shadow-lg ${isPTTUserSpeaking ? 'bg-red-500 animate-pulse' : 'bg-blue-500 hover:bg-blue-600'} focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:opacity-50`}
@@ -599,7 +685,6 @@ function KatoSpeakPageContent() {
             )}
           </div>
           <div className="absolute bottom-6 left-6 flex flex-col space-y-4">
-            {/* Agent Switcher for Patient */}
             {currentAgentConfig?.name !== patientAgent?.name && patientAgent && (
               <div 
                 onClick={() => !disableAgentSwitchers && handleAvatarAgentSelect(patientAgent.name)}
@@ -610,7 +695,6 @@ function KatoSpeakPageContent() {
                 <span className="mt-1 text-xs font-medium text-gray-600">{patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name}</span>
               </div>
             )}
-            {/* Agent Switcher for Preceptor */}
             {currentAgentConfig?.name !== preceptorAgent?.name && preceptorAgent && (
                <div 
                 onClick={() => !disableAgentSwitchers && handleAvatarAgentSelect(preceptorAgent.name)}
@@ -625,7 +709,6 @@ function KatoSpeakPageContent() {
         </div>
       </div>
 
-      {/* Bottom Toolbar - UI logic based on sessionStatus, currentAgentConfig, isSwitchingInProgress */}
       <div className="p-3 border-t bg-gray-50 flex justify-between items-center space-x-4">
         <div></div> 
         <div className="flex items-center space-x-4"> 

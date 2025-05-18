@@ -11,7 +11,7 @@ import { GuardrailChip } from "./GuardrailChip";
 export interface TranscriptProps {
   userText: string;
   setUserText: (val: string) => void;
-  onSendMessage: () => void;
+  onSendMessage: (text: string) => void;
   canSend: boolean;
   downloadRecording: () => void;
   selectedAgentName?: string;
@@ -248,22 +248,29 @@ function Transcript({
         <input
           ref={inputRef}
           type="text"
+          className="flex-1 p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder={canSend ? "Type your message..." : "Connect to an agent to chat"}
           value={userText}
           onChange={(e) => setUserText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && canSend) {
-              onSendMessage();
+            if (e.key === "Enter" && canSend && userText.trim()) {
+              onSendMessage(userText);
+              setUserText("");
             }
           }}
-          className="flex-1 px-4 py-2 focus:outline-none"
-          placeholder="Type a message..."
+          disabled={!canSend}
         />
         <button
-          onClick={onSendMessage}
+          onClick={() => {
+            if (canSend && userText.trim()) {
+              onSendMessage(userText);
+              setUserText("");
+            }
+          }}
           disabled={!canSend || !userText.trim()}
-          className="bg-gray-900 text-white rounded-full px-2 py-2 disabled:opacity-50"
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300"
         >
-          <Image src="/arrow.svg" alt="Send" width={24} height={24} />
+          Send
         </button>
       </div>
     </div>
