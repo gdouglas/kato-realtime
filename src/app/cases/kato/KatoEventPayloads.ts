@@ -27,6 +27,10 @@ export interface UserRequestedAudioInputModeChangePayload {
   mode: 'conversation' | 'ptt' | 'no_mic';
 }
 
+export interface UserRequestedMicrophoneAccessPayload {
+  requestType: 'initial' | 'retry'; // e.g. initial request vs. retry after denial
+}
+
 // Application/System Event Payloads
 export interface SessionStatusWillChangePayload {
   newStatus: SessionStatus;
@@ -202,6 +206,15 @@ export interface ToolCallCompletedPayload {
   success: boolean;
   result?: any; // The result of the tool call if successful
   error?: string; // Error message if not successful
+}
+
+/**
+ * Payload for the TOOL_CALL_STARTED event.
+ */
+export interface ToolCallStartedPayload {
+  callId?: string;      // Optional: Unique ID for the tool call, if available when started.
+  functionName: string; // The name of the function/tool being called.
+  argsString?: string;  // Optional: The arguments for the function call, as a string.
 }
 
 // No payload events (signal only)

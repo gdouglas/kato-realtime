@@ -720,8 +720,8 @@ function KatoSpeakPageContent() {
             disabled={(!currentAgentConfig && !(sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING")) || isSwitchingInProgress} >
             {sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING" ? "Disconnect" : "Connect"}
           </button>
-          <button onClick={() => router.push('/cases/kato/text')} 
-            className="px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 disabled:opacity-50"
+          <button onClick={() => router.push('/cases/kato/write')}
+            className="px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 disabled:opacity-50"
             disabled={isSwitchingInProgress || isIntroAudioPlaying}>
              Write 
           </button>
