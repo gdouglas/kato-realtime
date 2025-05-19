@@ -37,15 +37,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialSettings }) => {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  // Fire event on settings change
-  useEffect(() => {
-    if (!open) return;
-    eventBus.emit(KatoEvents.USER_UPDATED_SETTINGS, {
-      micEnabled,
-      audioOutputEnabled,
-      pushToTalk,
-    });
-  }, [micEnabled, audioOutputEnabled, pushToTalk, open, eventBus]);
+  // Fire event on settings change immediately on toggle
+  const emitSettings = (next: { micEnabled?: boolean; audioOutputEnabled?: boolean; pushToTalk?: boolean }) => {
+    const settings = {
+      micEnabled: next.micEnabled !== undefined ? next.micEnabled : micEnabled,
+      audioOutputEnabled: next.audioOutputEnabled !== undefined ? next.audioOutputEnabled : audioOutputEnabled,
+      pushToTalk: next.pushToTalk !== undefined ? next.pushToTalk : pushToTalk,
+    };
+    console.log('[SettingsModal] Emitting USER_UPDATED_SETTINGS:', settings);
+    eventBus.emit(KatoEvents.USER_UPDATED_SETTINGS, settings);
+  };
 
   if (!open) return null;
 
@@ -67,7 +68,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialSettings }) => {
             <input
               type="checkbox"
               checked={micEnabled}
-              onChange={e => setMicEnabled(e.target.checked)}
+              onChange={e => { setMicEnabled(e.target.checked); emitSettings({ micEnabled: e.target.checked }); }}
               className="form-checkbox h-5 w-5 text-blue-600"
             />
             <span className="text-gray-800 dark:text-gray-200">Enable Microphone</span>
@@ -76,7 +77,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialSettings }) => {
             <input
               type="checkbox"
               checked={audioOutputEnabled}
-              onChange={e => setAudioOutputEnabled(e.target.checked)}
+              onChange={e => { setAudioOutputEnabled(e.target.checked); emitSettings({ audioOutputEnabled: e.target.checked }); }}
               className="form-checkbox h-5 w-5 text-blue-600"
             />
             <span className="text-gray-800 dark:text-gray-200">Enable Audio Output</span>
@@ -85,7 +86,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ initialSettings }) => {
             <input
               type="checkbox"
               checked={pushToTalk}
-              onChange={e => setPushToTalk(e.target.checked)}
+              onChange={e => { setPushToTalk(e.target.checked); emitSettings({ pushToTalk: e.target.checked }); }}
               className="form-checkbox h-5 w-5 text-blue-600"
             />
             <span className="text-gray-800 dark:text-gray-200">Push-to-Talk Mode</span>

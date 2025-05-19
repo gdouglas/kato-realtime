@@ -223,3 +223,31 @@ export async function createRealtimeConnection(
 
   return { pc, dc };
 }
+
+// Utility: Replace or remove the microphone track on an active RTCPeerConnection
+export async function setMicrophoneEnabled(pc: RTCPeerConnection, enabled: boolean) {
+  const audioSender = pc.getSenders().find(sender => sender.track && sender.track.kind === 'audio');
+  if (enabled) {
+    // Add or replace with a new mic track
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const newTrack = stream.getAudioTracks()[0];
+    if (audioSender) {
+      await audioSender.replaceTrack(newTrack);
+    } else {
+      pc.addTrack(newTrack);
+    }
+  } else {
+    // Remove or disable the mic track
+    if (audioSender) {
+      await audioSender.replaceTrack(null);
+      if (audioSender.track) audioSender.track.stop();
+    }
+  }
+}
+
+// Utility: Mute or unmute the audio element for speaker control
+export function setAudioOutputEnabled(audioElement: HTMLAudioElement | null, enabled: boolean) {
+  if (audioElement) {
+    audioElement.muted = !enabled;
+  }
+}

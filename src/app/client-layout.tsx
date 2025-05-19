@@ -6,6 +6,8 @@ import { AgentLifecycleProvider } from '@/app/contexts/AgentLifecycleContext';
 import { EventBusProvider } from '@/app/contexts/EventBusContext';
 import { TranscriptProvider } from '@/app/contexts/TranscriptContext';
 import { EventProvider } from '@/app/contexts/EventContext';
+import { KatoRTCProvider } from '@/app/contexts/KatoRTCContext';
+import { AgentProvider } from '@/app/contexts/AgentContext';
 import { allAgentSets, defaultAgentSetKey } from "@/app/agentConfigs";
 import Image from "next/image";
 import SettingsButton from "@/app/components/Settings/SettingsButton";
@@ -47,26 +49,30 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
               audioElement={audioRef.current}
               isAudioPlaybackEnabled={isAudioPlaybackEnabled}
             >
-              {/* Consistent Header */}
-              <header className="p-2 border-b flex justify-between items-center bg-white dark:bg-gray-900 shadow-sm">
-                <div className="flex items-center">
-                  <Image 
-                    src="/logos/UBC-crest-blue.png" 
-                    alt="UBC Logo" 
-                    width={40} 
-                    height={40} 
-                    className="mr-3 w-10 h-auto"
-                  />
-                  <span className="text-md font-semibold text-gray-800 dark:text-white ml-2">Mr Kato - Realtime Patient Simulator</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <SettingsButton />
-                </div>
-              </header>
-              {/* Page Content */}
-              {children}
-              {/* Settings Modal overlays all content */}
-              <SettingsModal />
+              <KatoRTCProvider>
+                <AgentProvider>
+                  {/* Consistent Header */}
+                  <header className="p-2 border-b flex justify-between items-center bg-white dark:bg-gray-900 shadow-sm">
+                    <div className="flex items-center">
+                      <Image 
+                        src="/logos/UBC-crest-blue.png" 
+                        alt="UBC Logo" 
+                        width={40} 
+                        height={40} 
+                        className="mr-3 w-10 h-auto"
+                      />
+                      <span className="text-md font-semibold text-gray-800 dark:text-white ml-2">Mr Kato - Realtime Patient Simulator</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <SettingsButton />
+                    </div>
+                  </header>
+                  {/* Page Content */}
+                  {children}
+                  {/* Settings Modal overlays all content */}
+                  <SettingsModal />
+                </AgentProvider>
+              </KatoRTCProvider>
             </AgentLifecycleProvider>
           </EventProvider>
         </TranscriptProvider>

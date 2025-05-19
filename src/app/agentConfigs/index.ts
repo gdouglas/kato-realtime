@@ -11,4 +11,4 @@ export const allAgentSets: AllAgentConfigsType = {
   medicalHistoryTaking,
 };
 
-export const defaultAgentSetKey = "simpleExample";
+export const defaultAgentSetKey = "medicalHistoryTaking";

@@ -20,6 +20,7 @@ import useAudioDownload from "@/app/hooks/useAudioDownload";
 import { EventBus } from '@/app/lib/eventBus';
 import { AgentConfig, SessionStatus } from '@/app/types';
 import { KatoEvents } from '@/app/cases/kato/KatoEvents';
+import { setAudioOutputEnabled } from '@/app/lib/realtimeConnection';
 
 // UI components
 import KatoIntroScreen from "@/app/components/KatoIntroScreen";
@@ -56,7 +57,8 @@ function KatoSpeakPageContent() {
     logServerEvent: contextLogServerEvent,
     addTranscriptBreadcrumb: contextAddTranscriptBreadcrumb,
     eventBus: contextEventBus,
-    urlCodec: contextUrlCodec
+    urlCodec: contextUrlCodec,
+    pushToTalk = true,
   } = agentLifecycle.state.context;
 
   const { 
@@ -429,16 +431,13 @@ function KatoSpeakPageContent() {
 
   useEffect(() => {
     const handleAudioInputModeChange = (newMode: 'conversation' | 'ptt' | 'no_mic') => {
+      console.log('[SpeakPage] AUDIO_INPUT_MODE_CHANGED received:', newMode);
+      setCurrentAudioInputMode(newMode);
       setIsPTTActive(newMode === 'ptt');
     };
     const sub = eventBus.on(KatoEvents.AUDIO_INPUT_MODE_CHANGED, handleAudioInputModeChange);
-    setIsPTTActive(currentAudioInputMode === 'ptt');
-    return () => sub();
-  }, [eventBus, currentAudioInputMode]);
-
-  useEffect(() => {
-    const handleAudioInputModeChange = (newMode: "conversation" | "ptt" | "no_mic") => setCurrentAudioInputMode(newMode);
-    const sub = eventBus.on(KatoEvents.AUDIO_INPUT_MODE_CHANGED, handleAudioInputModeChange);
+    // Set initial state from context
+    handleAudioInputModeChange(currentAudioInputMode);
     return () => sub();
   }, [eventBus]);
 
@@ -551,6 +550,31 @@ function KatoSpeakPageContent() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    // Mute/unmute audio element when isAudioPlaybackEnabled changes
+    if (audioElementRef.current) {
+      setAudioOutputEnabled(audioElementRef.current, isAudioPlaybackEnabled);
+    }
+  }, [isAudioPlaybackEnabled]);
+
+  useEffect(() => {
+    if (pushToTalk) {
+      eventBus.emit(KatoEvents.USER_REQUESTED_AUDIO_INPUT_MODE_CHANGE, { mode: 'ptt' });
+    } else {
+      eventBus.emit(KatoEvents.USER_REQUESTED_AUDIO_INPUT_MODE_CHANGE, { mode: 'conversation' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pushToTalk]);
+
+  // Bridge: Forward USER_UPDATED_SETTINGS from event bus to XState machine
+  useEffect(() => {
+    const unsub = eventBus.on(KatoEvents.USER_UPDATED_SETTINGS, (settings) => {
+      console.log('[SpeakPage] Forwarding USER_UPDATED_SETTINGS to XState:', settings);
+      agentLifecycle.send({ type: 'USER_UPDATED_SETTINGS', ...settings });
+    });
+    return () => unsub();
+  }, [eventBus, agentLifecycle]);
 
   if (showIntroScreen) {
     return <KatoIntroScreen onStartWithPatient={handleStartWithPatient} onStartWithPreceptor={handleStartWithPreceptor} />;
@@ -671,18 +695,15 @@ function KatoSpeakPageContent() {
             </div>
           </div>
           <div className="mt-12">
-            {isPTTActive ? (
+            {currentAudioInputMode === 'ptt' ? (
               <button onMouseDown={handleTalkButtonDown} onMouseUp={handleTalkButtonUp} onTouchStart={handleTalkButtonDown} onTouchEnd={handleTalkButtonUp}
                 className={`px-10 py-5 rounded-full text-white text-xl font-semibold transition-colors shadow-lg ${isPTTUserSpeaking ? 'bg-red-500 animate-pulse' : 'bg-blue-500 hover:bg-blue-600'} focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:opacity-50`}
                 disabled={sessionStatus !== "CONNECTED" || isSwitchingInProgress || isIntroAudioPlaying} > {isPTTUserSpeaking ? "Listening..." : "Push to Talk"} </button>
             ) : (
-              <button onClick={() => { 
-                  if (sessionStatus === "CONNECTED" && !isSwitchingInProgress && !isIntroAudioPlaying) {
-                    setCurrentAudioInputMode("ptt");
-                  }
-                }}
-                className="px-8 py-4 rounded-lg text-gray-700 font-semibold transition-colors shadow-md border border-gray-400 hover:bg-gray-100 focus:outline-none focus:ring-4 focus:ring-gray-300 disabled:opacity-50"
-                disabled={sessionStatus !== "CONNECTED" || isSwitchingInProgress || isIntroAudioPlaying} > Switch to Push-to-Talk </button>
+              <div>
+                <span className="text-lg text-gray-700">Microphone is always on (conversation mode)</span>
+                {/* Optionally, render a mute button or indicator here */}
+              </div>
             )}
           </div>
           <div className="absolute bottom-6 left-6 flex flex-col space-y-4">

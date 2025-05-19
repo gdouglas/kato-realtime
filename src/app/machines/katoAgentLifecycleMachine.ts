@@ -1,7 +1,7 @@
 import { setup, createMachine, assign, fromPromise, sendTo, ActorRef } from 'xstate';
 import { AgentConfig } from '@/app/types';
 import { EventBus } from '@/app/lib/eventBus'; // Assuming path
-import { createRealtimeConnection } from '@/app/lib/realtimeConnection'; // Assuming path
+import { createRealtimeConnection, setMicrophoneEnabled, setAudioOutputEnabled } from '@/app/lib/realtimeConnection'; // Assuming path
 import { KatoEvents } from '@/app/cases/kato/KatoEvents'; // Added import
 
 // Define the actual RTC types if available, or use any for now
@@ -45,6 +45,11 @@ export interface AgentLifecycleMachineContext {
   // Added for enhanced event emission
   previousAgentName?: string;
   isSwitchingGlobal?: boolean;
+
+  // Settings
+  micEnabled?: boolean;
+  audioOutputEnabled?: boolean;
+  pushToTalk?: boolean;
 }
 
 export type AgentLifecycleMachineEvent =
@@ -68,7 +73,8 @@ export type AgentLifecycleMachineEvent =
   | { type: '_INTERNAL_FAIL_SWITCH' }
   // Tool execution feedback events (from tool executor to machine)
   | { type: 'TOOL_EXECUTOR_SUCCESS'; callId: string; functionName: string; result: any }
-  | { type: 'TOOL_EXECUTOR_FAILURE'; callId: string; functionName: string; error: any };
+  | { type: 'TOOL_EXECUTOR_FAILURE'; callId: string; functionName: string; error: any }
+  | { type: 'USER_UPDATED_SETTINGS'; micEnabled: boolean; audioOutputEnabled: boolean; pushToTalk: boolean }
 
 type SpecificEvent<T extends AgentLifecycleMachineEvent['type']> = Extract<AgentLifecycleMachineEvent, { type: T }>;
 
@@ -838,6 +844,11 @@ export const agentLifecycleMachine = setup({
     // Added for enhanced event emission
     previousAgentName: undefined,
     isSwitchingGlobal: false,
+
+    // Settings
+    micEnabled: true,
+    audioOutputEnabled: true,
+    pushToTalk: true,
   }),
   on: {
     RTC_CONNECTED: {
@@ -861,7 +872,33 @@ export const agentLifecycleMachine = setup({
     RTC_DATA_CHANNEL_ERROR_DETECTED: { 
       target: '#katoAgentLifecycle.connectionError',
       actions: ['assignErrorFromServiceEvent', 'setErrorStatus', 'clearRtcRefs', 'logErrorConnectionFailed']
-    }
+    },
+    USER_UPDATED_SETTINGS: {
+      actions: [
+        assign(({ context, event }) => {
+          // Toggle microphone if session is active
+          if (context.pc && typeof event.micEnabled === 'boolean') {
+            setMicrophoneEnabled(context.pc, event.micEnabled);
+          }
+          // Toggle speaker if audio element is available
+          if (context.audioElement && typeof event.audioOutputEnabled === 'boolean') {
+            setAudioOutputEnabled(context.audioElement, event.audioOutputEnabled);
+          }
+          // Emit AUDIO_INPUT_MODE_CHANGED if pushToTalk changes
+          if (context.eventBus && typeof event.pushToTalk === 'boolean') {
+            context.eventBus.emit(
+              KatoEvents.AUDIO_INPUT_MODE_CHANGED,
+              event.pushToTalk ? 'ptt' : 'conversation'
+            );
+          }
+          return {
+            micEnabled: event.micEnabled,
+            audioOutputEnabled: event.audioOutputEnabled,
+            pushToTalk: event.pushToTalk,
+          };
+        })
+      ],
+    },
   },
   states: {
     idle: {
