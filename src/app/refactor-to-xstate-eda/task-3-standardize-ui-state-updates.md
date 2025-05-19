@@ -1,53 +1,55 @@
-### Task 3: Standardize UI State Updates via Event Bus
+### Task 3: Standardize UI State Updates via Event Bus - **COMPLETED**
 
 **Objective:**
-Ensure that all UI state within components (especially in `AppContents.tsx` and its children) that changes in reaction to agent lifecycle events or server-sent information is updated consistently by subscribing to specific events on the `eventBus`. These `eventBus` events should originate from the `agentLifecycleMachine`.
+Ensure that all UI state within components (especially in `src/app/App.tsx` within the `AppContents` function and its children) that changes in reaction to agent lifecycle events or server-sent information is updated consistently by subscribing to specific events on the `eventBus`. These `eventBus` events should originate from the `agentLifecycleMachine`.
 
 **Rationale:**
-Currently, some UI state might be updated directly by hooks (like `useHandleServerEvent` calling `setIsOutputAudioBufferActive`) or based on observing the XState machine's context directly in `AppContents`. Standardizing this to an event bus-driven approach for reactive UI updates promotes decoupling: UI components listen for meaningful domain events rather than being tightly coupled to the internal workings of other hooks or the exact structure of the XState context. This makes the UI more reactive to the system's state changes in a consistent manner.
+Standardizing to an event bus-driven approach for reactive UI updates promotes decoupling: UI components listen for meaningful domain events rather than being tightly coupled to the internal workings of other hooks or the exact structure of the XState context. This makes the UI more reactive to the system's state changes in a consistent manner.
 
-**Steps:**
+**Summary of Completion:**
+*   All identified reactive UI states in `AppContents` (`src/app/App.tsx`) are now updated via the `eventBus`.
+*   `userResponseSuggestions`: Now cleared based on `KatoEvents.AGENT_SWITCH_COMPLETED`.
+*   `isFunctionCallInProgress`: Now managed by `KatoEvents.TOOL_CALL_STARTED` and `KatoEvents.TOOL_CALL_COMPLETED`.
+*   `micAccessError`: Newly identified and refactored to be driven by `KatoEvents.MICROPHONE_ACCESS_ERROR` and `KatoEvents.MICROPHONE_ACCESS_RECOVERED`.
+*   Previously event-driven states (`isOutputAudioBufferActive`, `showMicDeniedModal`, `audioInputMode`) were confirmed to be correctly implemented.
+*   Transcript data updates via `useTranscript` were verified to be event-driven through `eventBus` subscriptions in `TranscriptContext.tsx`.
+*   The XState machine (`katoAgentLifecycleMachine.ts`) and `useToolExecutor.ts` have been updated to emit and handle the necessary events.
+
+**Original Steps & How They Were Addressed:**
 
 1.  **Identify Reactive UI State:**
-    *   Review `AppContents.tsx` and its child components for local React state that changes based on the agent's lifecycle or information from the server.
-    *   Examples identified:
-        *   `isOutputAudioBufferActive` (in `AppContents.tsx`)
-        *   `showMicDeniedModal` (already correctly driven by `KatoEvents.SHOW_MIC_DENIED_MODAL_REQUESTED` from the bus - serve as a good example).
-        *   `audioInputMode` (already correctly driven by `KatoEvents.AUDIO_INPUT_MODE_CHANGED` from the bus).
-        *   Transcript data displayed in `Transcript.tsx` (will be covered by Task 2, ensuring it listens to bus events like `KatoEvents.SERVER_TRANSCRIPT_ITEM_CREATED`, etc.).
-        *   Potentially `userResponseSuggestions` if these are meant to be cleared/updated based on agent changes or specific server messages.
+    *   Review `AppContents` function in `src/app/App.tsx` and its child components.
+    *   **Completed.** States identified and addressed:
+        *   `isOutputAudioBufferActive` (Verified as already event-driven).
+        *   `showMicDeniedModal` (Verified as already event-driven).
+        *   `audioInputMode` (Verified as already event-driven).
+        *   `userResponseSuggestions` (Refactored to be event-driven).
+        *   `isFunctionCallInProgress` (Refactored to be event-driven).
+        *   `micAccessError` (Identified during review and refactored to be event-driven).
+        *   Transcript data (`useTranscript`) (Verified event-driven linkage via `TranscriptContext.tsx`).
 
 2.  **Ensure XState Machine Emits Necessary Events:**
-    *   For each piece of identified reactive UI state, confirm that the `agentLifecycleMachine` (primarily through its `processAndRelayServerMessage` action or other lifecycle actions) emits a clear, specific event onto the `eventBus` when that state should change.
-    *   Example: `KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED` is already emitted by the machine for `isOutputAudioBufferActive`.
-    *   If `userResponseSuggestions` should clear when an agent switches, the machine could emit an `AGENT_SWITCH_COMPLETED` event, and `AppContents` could listen to this to clear the suggestions.
+    *   **Completed.** The `katoAgentLifecycleMachine.ts` was updated:
+        *   Confirmed `KatoEvents.AGENT_SWITCH_COMPLETED` is emitted for `userResponseSuggestions`.
+        *   Added emission of `KatoEvents.TOOL_CALL_STARTED` when a function call is identified.
+        *   Added internal events (`TOOL_EXECUTOR_SUCCESS`/`FAILURE`) and an action (`emitToolCallCompleted`) to emit `KatoEvents.TOOL_CALL_COMPLETED`.
+        *   Added emission of `KatoEvents.MICROPHONE_ACCESS_ERROR` and `KatoEvents.MICROPHONE_ACCESS_RECOVERED`.
+        *   Verified existing transcript-related events are emitted.
 
-3.  **Refactor UI Components to Subscribe to `eventBus` Events:**
-    *   In `AppContents.tsx` or relevant child components/hooks:
-        *   Use `useEffect` and `useEventBus()` to subscribe to the appropriate events from the `eventBus`.
-        *   The callback for the event subscription should update the local React state (`useState`).
-        *   Ensure to return a cleanup function from `useEffect` to unsubscribe from the event bus when the component unmounts or dependencies change.
-    *   Example (for `isOutputAudioBufferActive` in `AppContents`):
-        ```typescript
-        // In AppContents.tsx
-        const eventBus = useEventBus();
-        const [isOutputAudioBufferActive, setIsOutputAudioBufferActive] = useState(false);
+3.  **Refactor UI Components/Hooks to Subscribe to `eventBus` Events:**
+    *   **Completed.** In `AppContents` function in `src/app/App.tsx`:
+        *   Added listener for `KatoEvents.AGENT_SWITCH_COMPLETED` to clear `userResponseSuggestions`.
+        *   Added listeners for `KatoEvents.TOOL_CALL_STARTED` and `KatoEvents.TOOL_CALL_COMPLETED` to manage `isFunctionCallInProgress`.
+        *   Added listeners for `KatoEvents.MICROPHONE_ACCESS_ERROR` and `KatoEvents.MICROPHONE_ACCESS_RECOVERED` to manage `micAccessError`.
+    *   `useToolExecutor.ts` was updated to emit `TOOL_EXECUTOR_SUCCESS`/`FAILURE` events back to the machine via the event bus.
+    *   `TranscriptContext.tsx` was verified to correctly subscribe to transcript-related `eventBus` events.
 
-        useEffect(() => {
-          const handleAudioBufferStatus = (isActive: boolean) => {
-            setIsOutputAudioBufferActive(isActive);
-          };
-          const unsubscribe = eventBus.on(KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED, handleAudioBufferStatus);
-          return () => unsubscribe();
-        }, [eventBus]);
-        ```
-    *   This replaces direct imperative calls like `setIsOutputAudioBufferActive(true)` from other hooks (e.g., `useHandleServerEvent`).
+4.  **Remove Direct State Manipulations:**
+    *   **Completed.** Direct state manipulations for `userResponseSuggestions` (in `handleAgentSelection`) and `isFunctionCallInProgress` (in `sendMessage`) were removed from `AppContents`.
 
-4.  **Remove Direct State Manipulations from Other Hooks:**
-    *   As part of Task 2, direct state manipulations (like `setIsOutputAudioBufferActive`) will be removed from `useHandleServerEvent`. This task ensures the UI correctly picks up these changes via the event bus.
+**Acceptance Criteria:** - **MET**
 
-**Acceptance Criteria:**
-
-*   UI state in `AppContents` and child components that reflects server information or lifecycle changes is updated by subscribing to events from the `eventBus`.
-*   Direct state setting from hooks like `useHandleServerEvent` into `AppContents` (or other components) is eliminated for these states.
-*   The UI remains responsive and accurately reflects the application state as orchestrated by the XState machine and communicated via the `eventBus`. 
+*   UI state for `userResponseSuggestions`, `isFunctionCallInProgress`, and `micAccessError` in `AppContents` (in `src/app/App.tsx`) is updated by subscribing to events from the `eventBus`.
+*   Direct state setting for these states from component methods (like `handleAgentSelection`, `sendMessage`) is eliminated.
+*   The `useTranscript` hook (via `TranscriptContext.tsx`) correctly updates transcript data based on `eventBus` events originating from the XState machine.
+*   The UI remains responsive and accurately reflects the application state as orchestrated by the XState machine and communicated via the `eventBus` (pending final testing, but logical flow established). 

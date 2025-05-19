@@ -46,6 +46,7 @@ export interface Tool {
 
 export interface AgentConfig {
   name: string;
+  displayName?: string;
   publicDescription: string; // gives context to agent transfer tool
   instructions: string;
   tools: Tool[];
@@ -78,7 +79,7 @@ export interface GuardrailResultType {
 export interface TranscriptItem {
   itemId: string;
   type: "MESSAGE" | "BREADCRUMB";
-  role?: "user" | "assistant";
+  role?: "user" | "assistant" | "system" | "function_call" | "function_call_output";
   title?: string;
   data?: Record<string, any>;
   expanded: boolean;

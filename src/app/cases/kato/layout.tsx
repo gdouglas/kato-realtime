@@ -25,9 +25,9 @@ export default function KatoCaseLayout({
   // The machine input accepts `null` initially.
 
   return (
-    <TranscriptProvider>
-      <EventProvider>
-        <EventBusProvider>
+    <EventBusProvider>
+      <TranscriptProvider>
+        <EventProvider>
           <AgentLifecycleProvider 
             urlCodec={urlCodec}
             audioElement={audioRef.current} // Pass the current value of the ref
@@ -40,10 +40,10 @@ export default function KatoCaseLayout({
               </AgentProvider>
             </KatoRTCProvider>
           </AgentLifecycleProvider>
-        </EventBusProvider>
-      </EventProvider>
-      {/* Render the actual audio element, hidden or styled as needed */}
-      <audio ref={audioRef} style={{ display: 'none' }} />
-    </TranscriptProvider>
+        </EventProvider>
+        {/* Render the actual audio element, hidden or styled as needed */}
+        <audio ref={audioRef} style={{ display: 'none' }} />
+      </TranscriptProvider>
+    </EventBusProvider>
   );
 } 

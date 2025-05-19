@@ -1,12 +1,30 @@
 ### Task 2: Centralize Server Message Processing in XState Machine
 
+**[COMPLETED]**
+
 **Objective:**
 Establish the `agentLifecycleMachine`'s `processAndRelayServerMessage` action as the single, authoritative processor for all incoming RTC data channel messages. This involves refactoring `useHandleServerEvent.ts` to eliminate redundant message processing and ensuring all application-relevant information derived from server messages is emitted as specific events onto the `eventBus` by the XState machine.
 
 **Rationale:**
 Currently, server messages seem to be processed in two places: by the XState machine (which emits some events to the `eventBus` and uses `lastServerMessage` for `AppContents`) and by `useHandleServerEvent.ts` (triggered by `AppContents` observing `lastServerMessage`). This dual processing is inefficient, can lead to inconsistencies, and complicates the data flow. Centralizing this in the XState machine will create a clear and robust pipeline for server messages.
 
-**Steps:**
+**Summary of Resolution:**
+*   The `processAndRelayServerMessage` action in `katoAgentLifecycleMachine.ts` was enhanced to parse all relevant RTC server messages and emit specific, fine-grained `KatoEvents` onto the `eventBus`. This includes events for session creation, transcript item creation/updates (user and assistant), assistant message deltas, function call requests, and transcript item status changes.
+*   The `useHandleServerEvent.ts` hook, which previously handled many of these messages directly, was systematically refactored:
+    *   Its function call handling logic (`handleFunctionCall`) was moved into a new dedicated hook, `useToolExecutor.ts`, which subscribes to `KatoEvents.SERVER_FUNCTION_CALL_REQUESTED`.
+    *   Its guardrail processing logic (`processGuardrail` and related delta accumulation) was moved into a new hook, `useTranscriptGuardrails.ts`, which subscribes to `KatoEvents.SERVER_ASSISTANT_DELTA_RECEIVED` and `KatoEvents.SERVER_ASSISTANT_MESSAGE_COMPLETED`.
+    *   Its responsibility for managing `isOutputAudioBufferActive` was removed; `AppContents` now updates this state by directly subscribing to `KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED`.
+*   The redundant `useEffect` block in `AppContents.tsx` that listened for `lastServerMessage` from the XState machine context to trigger `useHandleServerEvent` was removed.
+*   Consequently, `useHandleServerEvent.ts` became obsolete and was deleted from the codebase.
+*   The `TranscriptProvider` in `TranscriptContext.tsx` was updated to subscribe to the various server-driven `KatoEvents` from the `eventBus` to manage its internal `transcriptItems` state, making it the reactive source of truth for transcript data based on machine events.
+*   The local function call fallback in `App.tsx` was updated to emit an event on the `eventBus` for `useToolExecutor` to handle.
+*   The `session.update` RTC message, previously sent directly by `useToolExecutor` during agent transfer, is now handled by an action in the XState machine (`sendSessionUpdateOnActivation` in the `agentActive` state).
+*   An `OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED` event was added and is now emitted by the XState machine and handled in `App.tsx` to clear the audio buffer during agent transitions.
+*   Type safety for event bus subscriptions in `TranscriptContext.tsx` was improved by removing unnecessary casts.
+
+This centralization ensures a clearer, event-driven data flow for server messages, with the XState machine acting as the primary processor and dispatcher.
+
+**Original Steps:**
 
 1.  **Enhance `processAndRelayServerMessage` in `agentLifecycleMachine.ts`:**
     *   Review all message types and data currently processed by the `switch` statement in `useHandleServerEvent.ts` (e.g., `session.created`, `conversation.item.created`, `conversation.item.input_audio_transcription.completed`, `response.audio_transcript.delta`, `response.done` which includes function calls, `response.output_item.done`).

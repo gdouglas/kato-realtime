@@ -65,7 +65,10 @@ export type AgentLifecycleMachineEvent =
   // Added internal events
   | { type: '_INTERNAL_MARK_SWITCH_START_AND_EMIT' }
   | { type: '_INTERNAL_COMPLETE_SWITCH' }
-  | { type: '_INTERNAL_FAIL_SWITCH' };
+  | { type: '_INTERNAL_FAIL_SWITCH' }
+  // Tool execution feedback events (from tool executor to machine)
+  | { type: 'TOOL_EXECUTOR_SUCCESS'; callId: string; functionName: string; result: any }
+  | { type: 'TOOL_EXECUTOR_FAILURE'; callId: string; functionName: string; error: any };
 
 type SpecificEvent<T extends AgentLifecycleMachineEvent['type']> = Extract<AgentLifecycleMachineEvent, { type: T }>;
 
@@ -365,10 +368,22 @@ export const agentLifecycleMachine = setup({
           if (serverMessage.response?.output) {
             serverMessage.response.output.forEach((outputItem: any) => {
               if (outputItem.type === 'function_call' && outputItem.name && outputItem.arguments) {
+                const callId = outputItem.call_id; // May be undefined from server, though good practice to have
+                const functionName = outputItem.name;
+                const argsString = outputItem.arguments;
+
+                // Emit that a tool call has been identified and is starting
+                eventBus.emit(KatoEvents.TOOL_CALL_STARTED, {
+                  callId,
+                  functionName,
+                  argsString, // Keep argsString for consistency with SERVER_FUNCTION_CALL_REQUESTED
+                });
+                
+                // Emit event for the tool executor to pick up
                 eventBus.emit(KatoEvents.SERVER_FUNCTION_CALL_REQUESTED, {
-                  callId: outputItem.call_id, 
-                  functionName: outputItem.name,
-                  argsString: outputItem.arguments,
+                  callId, 
+                  functionName,
+                  argsString,
                 });
               } else if (outputItem.type === 'message' && outputItem.role === 'assistant' && !outputItem.content?.[0]?.transcript && outputItem.content?.[0]?.text) {
                 const itemId = outputItem.id;
@@ -486,6 +501,57 @@ export const agentLifecycleMachine = setup({
         });
       }
     },
+    sendSessionUpdateOnActivation: ({ context }) => {
+      const { dc, currentAgentConfig, logClientEvent, eventBus } = context;
+      if (dc && dc.readyState === 'open' && currentAgentConfig) {
+        const sessionUpdatePayload = {
+          type: "session.update",
+          session: {
+            modalities: ["text", "audio"], // Default or derive from agentConfig if available
+            instructions: currentAgentConfig.instructions,
+            voice: currentAgentConfig.voice || "shimmer", // Default voice if not specified
+            input_audio_transcription: { model: "whisper-1" }, // Default or derive
+            tools: currentAgentConfig.tools || [],
+          }
+        };
+        try {
+          dc.send(JSON.stringify(sessionUpdatePayload));
+          logClientEvent(sessionUpdatePayload, "session_update_on_activation");
+          console.log("[XState Actions] Sent session.update on agent activation:", sessionUpdatePayload);
+
+          // Also clear any pending output audio buffer from a previous agent/interaction
+          eventBus.emit(KatoEvents.OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED);
+
+        } catch (error) {
+          console.error("[XState Actions] Error sending session.update:", error);
+        }
+      } else {
+        console.warn("[XState Actions] Could not send session.update: DC not open or no currentAgentConfig.", { dcState: dc?.readyState, agent: !!currentAgentConfig });
+      }
+    },
+    // Action to emit TOOL_CALL_COMPLETED
+    emitToolCallCompleted: ({ context, event }) => {
+      const { eventBus } = context;
+      const toolEvent = event as Extract<AgentLifecycleMachineEvent, { type: 'TOOL_EXECUTOR_SUCCESS' | 'TOOL_EXECUTOR_FAILURE' }>;
+      
+      if (toolEvent.type === 'TOOL_EXECUTOR_SUCCESS') {
+        console.log(`[XState Actions] Emitting TOOL_CALL_COMPLETED (Success) for ${toolEvent.functionName} (${toolEvent.callId})`);
+        eventBus.emit(KatoEvents.TOOL_CALL_COMPLETED, { 
+          callId: toolEvent.callId, 
+          functionName: toolEvent.functionName,
+          success: true, 
+          result: toolEvent.result 
+        });
+      } else if (toolEvent.type === 'TOOL_EXECUTOR_FAILURE') {
+        console.log(`[XState Actions] Emitting TOOL_CALL_COMPLETED (Failure) for ${toolEvent.functionName} (${toolEvent.callId})`);
+        eventBus.emit(KatoEvents.TOOL_CALL_COMPLETED, { 
+          callId: toolEvent.callId,
+          functionName: toolEvent.functionName,
+          success: false, 
+          error: toolEvent.error 
+        });
+      }
+    },
   },
   actors: {
     fetchTokenAndConnectRTC: fromPromise(async ({ input, self }) => {
@@ -533,8 +599,8 @@ export const agentLifecycleMachine = setup({
               dc.onopen = () => {
                 console.log("[XState DEBUG] fetchTokenAndConnectRTC: Data channel open.");
                 console.log("[XState DEBUG] Realtime connection established (XState Actor).");
-                // The promise resolving handles the transition via onDone in the invoking state.
-                // No need to send RTC_CONNECTED from here.
+                // If data channel opens, it implies any previous mic access issues might be resolved or worked around (e.g., user granted access, or connection proceeded without audio if not critical path)
+                eventBus.emit(KatoEvents.MICROPHONE_ACCESS_RECOVERED);
                 resolve({ pc, dc }); 
               };
               dc.onerror = (event: Event) => {
@@ -558,11 +624,11 @@ export const agentLifecycleMachine = setup({
             console.error(`[XState DEBUG] Error connecting to Realtime: ${error.message}`);
             logClientEvent({ error: error.message, name: error.name }, "connection_error_xstate");
             if (error.name === 'NotAllowedError') {
-                // addTranscriptBreadcrumb("Microphone access denied. Switched to text input mode.");
                 console.warn("[XState DEBUG] fetchTokenAndConnectRTC: Microphone access denied.");
                 eventBus.emit(KatoEvents.UI_MODE_CHANGED, 'text');
                 eventBus.emit(KatoEvents.AUDIO_INPUT_MODE_CHANGED, 'no_mic');
                 eventBus.emit(KatoEvents.SHOW_MIC_DENIED_MODAL_REQUESTED);
+                eventBus.emit(KatoEvents.MICROPHONE_ACCESS_ERROR, { error: error.message || 'Microphone access was denied.' });
               }
             reject(error); 
         }
@@ -965,12 +1031,13 @@ export const agentLifecycleMachine = setup({
       entry: [
         'setConnectedStatus',
         'assignRtcEventHandlers',
+        'sendSessionUpdateOnActivation',
         'logBreadcrumbAgentActive',
         ({ context, self }) => {
           if (context.isSwitchingGlobal) {
             self.send({ type: '_INTERNAL_COMPLETE_SWITCH' } as any);
           }
-        }
+        },
       ],
       onExit: ['clearRtcEventHandlers'],
       on: {
@@ -1016,7 +1083,13 @@ export const agentLifecycleMachine = setup({
         },
         AUDIO_ELEMENT_READY: {
           actions: ['assignAudioElement']
-        }
+        },
+        TOOL_EXECUTOR_SUCCESS: { 
+          actions: ['emitToolCallCompleted']
+        },
+        TOOL_EXECUTOR_FAILURE: { 
+          actions: ['emitToolCallCompleted'] 
+        },
       },
     },
     disconnectingManually: {

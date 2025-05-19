@@ -4,144 +4,89 @@ import { SessionStatus } from "@/app/types";
 interface BottomToolbarProps {
   sessionStatus: SessionStatus;
   onToggleConnection: () => void;
-  isPTTActive: boolean;
-  setIsPTTActive: (val: boolean) => void;
-  isPTTUserSpeaking: boolean;
-  handleTalkButtonDown: () => void;
-  handleTalkButtonUp: () => void;
-  isEventsPaneExpanded: boolean;
-  setIsEventsPaneExpanded: (val: boolean) => void;
-  isAudioPlaybackEnabled: boolean;
-  setIsAudioPlaybackEnabled: (val: boolean) => void;
-  codec: string;
-  onCodecChange: (newCodec: string) => void;
+  agentName: string;
+  isAgentActive: boolean;
+  isConnecting: boolean;
+  isSwitching: boolean;
+  isError: boolean;
+  errorMessage: string;
+  isOutputAudioBufferActive: boolean;
+  audioInputMode: string;
+  onAudioInputModeChange: (mode: string) => void;
+  isMicAccessError: boolean;
 }
 
 function BottomToolbar({
   sessionStatus,
   onToggleConnection,
-  isPTTActive,
-  setIsPTTActive,
-  isPTTUserSpeaking,
-  handleTalkButtonDown,
-  handleTalkButtonUp,
-  isEventsPaneExpanded,
-  setIsEventsPaneExpanded,
-  isAudioPlaybackEnabled,
-  setIsAudioPlaybackEnabled,
-  codec,
-  onCodecChange,
+  agentName,
+  isAgentActive,
+  isConnecting,
+  isSwitching,
+  isError,
+  errorMessage,
+  isOutputAudioBufferActive,
+  audioInputMode,
+  onAudioInputModeChange,
+  isMicAccessError,
 }: BottomToolbarProps) {
-  const isConnected = sessionStatus === "CONNECTED";
-  const isConnecting = sessionStatus === "CONNECTING";
-
-  const handleCodecChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newCodec = e.target.value;
-    onCodecChange(newCodec);
-  };
-
   function getConnectionButtonLabel() {
-    if (isConnected) return "Disconnect";
+    if (isAgentActive) return "Disconnect";
     if (isConnecting) return "Connecting...";
+    if (isSwitching) return "Switching...";
+    if (isError) return "Retry";
     return "Connect";
   }
 
   function getConnectionButtonClasses() {
     const baseClasses = "text-white text-base p-2 w-36 rounded-md h-full";
-    const cursorClass = isConnecting ? "cursor-not-allowed" : "cursor-pointer";
-
-    if (isConnected) {
-      // Connected -> label "Disconnect" -> red
-      return `bg-red-600 hover:bg-red-700 ${cursorClass} ${baseClasses}`;
+    let finalClasses = baseClasses;
+    if (isConnecting || isSwitching) {
+      finalClasses += " cursor-not-allowed bg-gray-500";
+    } else if (isAgentActive) {
+      finalClasses += " cursor-pointer bg-red-600 hover:bg-red-700";
+    } else {
+      finalClasses += " cursor-pointer bg-black hover:bg-gray-900";
     }
-    // Disconnected or connecting -> label is either "Connect" or "Connecting" -> black
-    return `bg-black hover:bg-gray-900 ${cursorClass} ${baseClasses}`;
+    return finalClasses;
   }
 
   return (
-    <div className="p-4 flex flex-row items-center justify-center gap-x-8">
+    <div className="p-4 flex flex-row items-center justify-center gap-x-4 sm:gap-x-6 md:gap-x-8 flex-wrap bg-gray-100 dark:bg-gray-800 border-t dark:border-gray-700">
       <button
         onClick={onToggleConnection}
         className={getConnectionButtonClasses()}
-        disabled={isConnecting}
+        disabled={isConnecting || isSwitching}
       >
         {getConnectionButtonLabel()}
       </button>
 
-      <div className="flex flex-row items-center gap-2">
-        <input
-          id="push-to-talk"
-          type="checkbox"
-          checked={isPTTActive}
-          onChange={(e) => setIsPTTActive(e.target.checked)}
-          disabled={!isConnected}
-          className="w-4 h-4"
-        />
-        <label
-          htmlFor="push-to-talk"
-          className="flex items-center cursor-pointer"
-        >
-          Push to talk
-        </label>
-        <button
-          onMouseDown={handleTalkButtonDown}
-          onMouseUp={handleTalkButtonUp}
-          onTouchStart={handleTalkButtonDown}
-          onTouchEnd={handleTalkButtonUp}
-          disabled={!isPTTActive}
-          className={
-            (isPTTUserSpeaking ? "bg-gray-300" : "bg-gray-200") +
-            " py-1 px-4 cursor-pointer rounded-md" +
-            (!isPTTActive ? " bg-gray-100 text-gray-400" : "")
-          }
-        >
-          Talk
-        </button>
+      <div className={`text-sm ${isError ? "text-red-500" : "text-gray-700 dark:text-gray-300"} min-w-[100px] text-center whitespace-nowrap`}>
+        Status: {isError ? `Error` : sessionStatus}
+      </div>
+      <div className="text-sm text-gray-700 dark:text-gray-300 min-w-[100px] text-center whitespace-nowrap">
+        Agent: {agentName}
+      </div>
+      
+      <div className="text-sm text-gray-700 dark:text-gray-300">
+        Input: {audioInputMode} {isMicAccessError ? "(Mic Error ⚠️)" : ""}
+      </div>
+      <button 
+        onClick={() => onAudioInputModeChange(audioInputMode === 'push_to_talk' ? 'continuous' : 'push_to_talk')}
+        className={`p-2 border rounded text-sm ${isMicAccessError ? "border-red-500 text-red-500" : "border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"}`} 
+        title={isMicAccessError ? "Microphone access error!" : "Toggle input mode"}
+      >
+        Toggle Mic Mode
+      </button>
+      <div className="text-sm text-gray-700 dark:text-gray-300">
+        Audio Out: {isOutputAudioBufferActive ? "Playing" : "Idle"}
       </div>
 
-      <div className="flex flex-row items-center gap-1">
-        <input
-          id="audio-playback"
-          type="checkbox"
-          checked={isAudioPlaybackEnabled}
-          onChange={(e) => setIsAudioPlaybackEnabled(e.target.checked)}
-          disabled={!isConnected}
-          className="w-4 h-4"
-        />
-        <label
-          htmlFor="audio-playback"
-          className="flex items-center cursor-pointer"
-        >
-          Audio playback
-        </label>
-      </div>
-
-      <div className="flex flex-row items-center gap-2">
-        <input
-          id="logs"
-          type="checkbox"
-          checked={isEventsPaneExpanded}
-          onChange={(e) => setIsEventsPaneExpanded(e.target.checked)}
-          className="w-4 h-4"
-        />
-        <label htmlFor="logs" className="flex items-center cursor-pointer">
-          Logs
-        </label>
-      </div>
-
-      <div className="flex flex-row items-center gap-2">
-        <div>Codec:</div>
-        <select
-          id="codec-select"
-          value={codec}
-          onChange={handleCodecChange}
-          className="border border-gray-300 rounded-md px-2 py-1 focus:outline-none cursor-pointer"
-        >
-          <option value="opus">Opus (48 kHz)</option>
-          <option value="pcmu">PCMU (8 kHz)</option>
-          <option value="pcma">PCMA (8 kHz)</option>
-        </select>
-      </div>
+      {isError && errorMessage && (
+        <div className="w-full text-center text-red-500 text-xs pt-2">
+          Details: {errorMessage}
+        </div>
+      )}
     </div>
   );
 }
