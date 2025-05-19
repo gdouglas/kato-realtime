@@ -5,34 +5,21 @@ import { v4 as uuidv4 } from "uuid";
 import { TranscriptItem } from "@/app/types";
 import { useEventBus } from "./EventBusContext"; // Assuming this path is correct
 import { KatoEvents } from "@/app/cases/kato/KatoEvents";
+import {
+  ServerSessionCreatedPayload,
+  ServerTranscriptItemCreatedPayload,
+  ServerUserTranscriptCompletedPayload,
+  ServerAssistantDeltaReceivedPayload,
+  ServerAssistantMessageCompletedPayload,
+  ServerTranscriptItemStatusUpdatePayload,
+  ServerUserTranscriptDeltaPayload
+} from "@/app/cases/kato/KatoEventPayloads";
 
 // Payloads for events (mirroring what machine emits)
-interface ServerSessionCreatedPayload {
-  sessionId: string;
-}
-interface ServerTranscriptItemCreatedPayload {
-  itemId: string;
-  role: "user" | "assistant" | "system" | "function_call" | "function_call_output";
-  text: string;
-  isHidden?: boolean; // Assuming isHidden might be part of this event
-}
-interface ServerUserTranscriptCompletedPayload {
-  itemId: string;
-  transcript: string;
-}
-interface ServerAssistantDeltaPayload {
-  itemId: string;
-  deltaText: string;
-}
-interface ServerAssistantMessageCompletedPayload {
-  itemId: string;
-  fullText: string;
-}
-interface ServerTranscriptItemStatusUpdatePayload {
-  itemId: string;
-  status: string; // Consider making this a more specific type if possible
-  finalText?: string;
-}
+// Remove individual interface definitions if they are now imported from KatoEventPayloads.ts
+// For example, remove:
+// interface ServerSessionCreatedPayload { sessionId: string; }
+// ... and so on for other payload types already defined in KatoEventPayloads.ts
 
 type TranscriptContextValue = {
   transcriptItems: TranscriptItem[];
@@ -137,6 +124,8 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
     );
   }, [setTranscriptItems]);
 
+  const USER_PROCESSING_PLACEHOLDER = "[Processing...]"; // Define placeholder
+
   useEffect(() => {
     const handleServerSessionCreated = (data: ServerSessionCreatedPayload) => {
       console.log("[TranscriptContext] Event: SERVER_SESSION_CREATED", data);
@@ -182,7 +171,23 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
       );
     };
 
-    const handleServerAssistantDeltaReceived = (data: ServerAssistantDeltaPayload) => {
+    const handleServerUserTranscriptDelta = (data: ServerUserTranscriptDeltaPayload) => {
+      // console.log("[TranscriptContext] Event: SERVER_USER_TRANSCRIPT_DELTA", data); // Can be noisy
+      setTranscriptItems((prev) =>
+        prev.map((item) => {
+          if (item.itemId === data.itemId && item.type === "MESSAGE" && item.role === "user") {
+            return {
+              ...item,
+              title: item.title === USER_PROCESSING_PLACEHOLDER ? data.deltaText : (item.title ?? "") + data.deltaText,
+              status: "IN_PROGRESS",
+            };
+          }
+          return item;
+        })
+      );
+    };
+
+    const handleServerAssistantDeltaReceived = (data: ServerAssistantDeltaReceivedPayload) => {
       // console.log("[TranscriptContext] Event: SERVER_ASSISTANT_DELTA_RECEIVED", data); // Can be too noisy
       setTranscriptItems((prev) =>
         prev.map((item) => {
@@ -210,19 +215,26 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
     };
 
     const handleServerTranscriptItemStatusUpdate = (data: ServerTranscriptItemStatusUpdatePayload) => {
-      console.log("[TranscriptContext] Event: SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE", data);
-      setTranscriptItems((prev) =>
-        prev.map((item) =>
-          item.itemId === data.itemId
-            ? { ...item, status: data.status as TranscriptItem['status'], title: data.finalText !== undefined ? data.finalText : item.title }
-            : item
-        )
-      );
+      console.log("[TranscriptContext] Event: SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE received data:", JSON.stringify(data));
+      setTranscriptItems((prev) => {
+        console.log(`[TranscriptContext] SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE: prevItems count: ${prev.length}`);
+        const newItems = prev.map((item) => {
+          if (item.itemId === data.itemId) {
+            const newTitle = data.finalText !== undefined ? data.finalText : item.title;
+            console.log(`[TranscriptContext] SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE: Matched itemId ${data.itemId}. Old title: '${item.title}', New title: '${newTitle}', Status: '${data.status}'`);
+            return { ...item, status: data.status as TranscriptItem['status'], title: newTitle };
+          }
+          return item;
+        });
+        // console.log(`[TranscriptContext] SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE: newItems:`, JSON.stringify(newItems.find(i => i.itemId === data.itemId)));
+        return newItems;
+      });
     };
 
     eventBus.on(KatoEvents.SERVER_SESSION_CREATED, handleServerSessionCreated);
     eventBus.on(KatoEvents.SERVER_TRANSCRIPT_ITEM_CREATED, handleServerTranscriptItemCreated);
     eventBus.on(KatoEvents.SERVER_USER_TRANSCRIPT_COMPLETED, handleServerUserTranscriptCompleted);
+    eventBus.on(KatoEvents.SERVER_USER_TRANSCRIPT_DELTA, handleServerUserTranscriptDelta);
     eventBus.on(KatoEvents.SERVER_ASSISTANT_DELTA_RECEIVED, handleServerAssistantDeltaReceived);
     eventBus.on(KatoEvents.SERVER_ASSISTANT_MESSAGE_COMPLETED, handleServerAssistantMessageCompleted);
     eventBus.on(KatoEvents.SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE, handleServerTranscriptItemStatusUpdate);
@@ -231,6 +243,7 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
       eventBus.off(KatoEvents.SERVER_SESSION_CREATED, handleServerSessionCreated);
       eventBus.off(KatoEvents.SERVER_TRANSCRIPT_ITEM_CREATED, handleServerTranscriptItemCreated);
       eventBus.off(KatoEvents.SERVER_USER_TRANSCRIPT_COMPLETED, handleServerUserTranscriptCompleted);
+      eventBus.off(KatoEvents.SERVER_USER_TRANSCRIPT_DELTA, handleServerUserTranscriptDelta);
       eventBus.off(KatoEvents.SERVER_ASSISTANT_DELTA_RECEIVED, handleServerAssistantDeltaReceived);
       eventBus.off(KatoEvents.SERVER_ASSISTANT_MESSAGE_COMPLETED, handleServerAssistantMessageCompleted);
       eventBus.off(KatoEvents.SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE, handleServerTranscriptItemStatusUpdate);

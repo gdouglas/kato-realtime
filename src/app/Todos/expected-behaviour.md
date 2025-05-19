@@ -1,5 +1,7 @@
 # Expected behaviour
 
+## Chat page
+
 1. User session initalizes in the browers.
 2. Intro Screen is show.
 3. User selects the agent to start the conversation.
@@ -29,6 +31,8 @@
 25. Agent responds to "Hi"
 26. User sends message, "how are you doing?"
 27. Agent responds. 
+
+
 
 # Agent behaviour
 - Anytime the agent is speaking they will have an indicator.

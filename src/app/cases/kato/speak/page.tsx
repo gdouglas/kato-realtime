@@ -579,8 +579,6 @@ function KatoSpeakPageContent() {
     <div className="text-base flex flex-col h-screen bg-gray-100 text-gray-800 relative">
       <div className="p-4 text-lg font-semibold flex justify-between items-center border-b bg-white shadow-sm">
         <div className="flex items-center">
-          <Image src="/logos/UBC-crest-blue.png" alt="UBC Logo" width={48} height={48} className="mr-3"/>
-          <span className="text-gray-500 font-medium text-lg mr-2 ml-2 h-full border-l border-gray-300">&nbsp;</span>
           <span className="font-bold text-xl flex items-center">
             {katoCaseDetails.mainTitle}
             <LuInfo 

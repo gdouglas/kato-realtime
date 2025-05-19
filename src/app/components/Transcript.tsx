@@ -22,6 +22,7 @@ export interface TranscriptProps {
   micAccessError: boolean;
   onMicAccessError: () => void;
   onMicAccessRecovered: () => void;
+  micDisabled?: boolean;
 }
 
 function Transcript({
@@ -38,8 +39,10 @@ function Transcript({
   micAccessError,
   onMicAccessError,
   onMicAccessRecovered,
+  micDisabled,
 }: TranscriptProps) {
   const { transcriptItems, toggleTranscriptItemExpand } = useTranscript();
+  console.log("[Transcript.tsx] Received transcriptItems:", JSON.stringify(transcriptItems, null, 2));
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const [prevLogs, setPrevLogs] = useState<TranscriptItem[]>([]);
   const [justCopied, setJustCopied] = useState(false);
@@ -87,6 +90,43 @@ function Transcript({
     }
   };
 
+  const handleDownloadTranscript = () => {
+    const simplifiedAgentName = currentAgentName ? currentAgentName.replace(/\s+/g, '_').toLowerCase() : 'agent';
+    const date = new Date();
+    const dateString = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+    const timeString = `${date.getHours().toString().padStart(2, '0')}${date.getMinutes().toString().padStart(2, '0')}`;
+    const filename = `transcript_${simplifiedAgentName}_${dateString}_${timeString}.txt`;
+
+    let transcriptText = `Transcript with: ${currentAgentName || 'N/A'}\n`;
+    transcriptText += `Date: ${date.toLocaleString()}\n\n`;
+
+    transcriptItems.forEach(item => {
+      if (item.type === "MESSAGE") {
+        const currentRole = item.role || "unknown";
+        const roleDisplay = currentRole === 'user' ? 'User' : currentRole === 'assistant' ? (currentAgentName || 'Assistant') : currentRole.charAt(0).toUpperCase() + currentRole.slice(1);
+        const displayTimestamp = item.timestamp || new Date(item.createdAtMs).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        const title = item.title?.startsWith("[") && item.title?.endsWith("]") ? item.title.slice(1, -1) : item.title;
+        transcriptText += `[${displayTimestamp}] ${roleDisplay}: ${title}\n`;
+      } else if (item.type === "BREADCRUMB") {
+        const displayTimestamp = item.timestamp || new Date(item.createdAtMs).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        transcriptText += `[${displayTimestamp}] --- ${item.title} --- \n`;
+        if (item.data) {
+          transcriptText += `    Data: ${JSON.stringify(item.data)}\n`;
+        }
+      }
+    });
+
+    const blob = new Blob([transcriptText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const handleSend = () => {
     if (currentUserInput.trim()) {
       onSendText(currentUserInput.trim());
@@ -103,9 +143,18 @@ function Transcript({
           <button
             onClick={handleCopyTranscript}
             className="text-sm px-3 py-1 rounded-md bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 flex items-center justify-center gap-x-1"
+            title="Copy transcript to clipboard"
           >
             <ClipboardCopyIcon />
             {justCopied ? "Copied!" : "Copy"}
+          </button>
+          <button
+            onClick={handleDownloadTranscript}
+            className="text-sm px-3 py-1 rounded-md bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 flex items-center justify-center gap-x-1"
+            title="Download transcript as a text file"
+          >
+            <DownloadIcon />
+            Download
           </button>
         </div>
       </div>
@@ -214,7 +263,7 @@ function Transcript({
                 key={index}
                 onClick={() => onSendText(suggestion)}
                 className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 dark:bg-blue-700 dark:text-blue-100 dark:hover:bg-blue-600"
-                disabled={isAgentLoading || isSwitchingAgent || isFunctionCallInProgress}
+                disabled={isAgentLoading || isSwitchingAgent || isFunctionCallInProgress || micDisabled}
               >
                 {suggestion}
               </button>
@@ -228,19 +277,27 @@ function Transcript({
             value={currentUserInput}
             onChange={(e) => setCurrentUserInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={micAccessError ? "Microphone access denied" : (audioInputMode === "push_to_talk" ? "Type message or hold space to talk" : "Type message or speak")}
+            placeholder={
+              micDisabled 
+                ? "Type message..."
+                : micAccessError 
+                  ? "Microphone access denied" 
+                  : audioInputMode === "push_to_talk" 
+                    ? "Type message or hold space to talk" 
+                    : "Type message or speak"
+            }
             className="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-            disabled={isAgentLoading || isSwitchingAgent || isFunctionCallInProgress || micAccessError}
+            disabled={isAgentLoading || isSwitchingAgent || isFunctionCallInProgress || micAccessError || micDisabled}
           />
           <button
             onClick={handleSend}
-            disabled={isAgentLoading || isSwitchingAgent || isFunctionCallInProgress || !currentUserInput.trim() || micAccessError}
+            disabled={isAgentLoading || isSwitchingAgent || isFunctionCallInProgress || !currentUserInput.trim() || micAccessError || micDisabled}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
           >
             Send
           </button>
         </div>
-        {micAccessError && <p className="text-red-500 text-xs mt-1">Microphone access is denied. Please check your browser settings.</p>}
+        {(micAccessError && !micDisabled) && <p className="text-red-500 text-xs mt-1">Microphone access is denied. Please check your browser settings.</p>}
       </div>
     </div>
   );

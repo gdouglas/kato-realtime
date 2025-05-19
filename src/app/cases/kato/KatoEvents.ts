@@ -360,6 +360,15 @@ export const KatoEvents = {
   SERVER_USER_TRANSCRIPT_COMPLETED: 'SERVER_USER_TRANSCRIPT_COMPLETED' as const,
 
   /**
+   * A delta (partial update) for a user's transcript item has been received from the server.
+   * This is typically used for live transcription updates.
+   * Emitted by: `agentLifecycleMachine` (after processing server message `conversation.item.input_audio_transcription.delta`).
+   * Consumed by: `TranscriptContext` (to update the user's message in real-time).
+   * Payload: {@link Payloads.ServerUserTranscriptDeltaPayload}
+   */
+  SERVER_USER_TRANSCRIPT_DELTA: 'SERVER_USER_TRANSCRIPT_DELTA' as const,
+
+  /**
    * The server is streaming parts (deltas) of an assistant's message.
    * Emitted by: Server message processing logic (derived from Task 2).
    * Consumed by: Transcript context/service (to update an in-progress assistant message).
@@ -505,4 +514,8 @@ export const KatoEvents = {
    * Payload: {@link Payloads.ToolCallCompletedPayload}
    */
   TOOL_CALL_COMPLETED: "TOOL_CALL_COMPLETED" as const,
+
+  USER_REQUESTED_OPEN_SETTINGS_MODAL: 'USER_REQUESTED_OPEN_SETTINGS_MODAL',
+  USER_REQUESTED_CLOSE_SETTINGS_MODAL: 'USER_REQUESTED_CLOSE_SETTINGS_MODAL',
+  USER_UPDATED_SETTINGS: 'USER_UPDATED_SETTINGS',
 }; 

@@ -303,6 +303,17 @@ export const agentLifecycleMachine = setup({
           break;
         }
 
+        case 'conversation.item.input_audio_transcription.delta': {
+          const itemId = serverMessage.item_id;
+          const deltaText = serverMessage.delta;
+          if (itemId && typeof deltaText === 'string') {
+            eventBus.emit(KatoEvents.SERVER_USER_TRANSCRIPT_DELTA, { itemId, deltaText });
+          } else {
+            console.warn('[XState] Malformed conversation.item.input_audio_transcription.delta:', serverMessage);
+          }
+          break;
+        }
+
         case 'conversation.item.input_audio_transcription.completed':
           if (serverMessage.item_id && typeof serverMessage.transcript === 'string') {
             eventBus.emit(KatoEvents.SERVER_USER_TRANSCRIPT_COMPLETED, { 
@@ -502,15 +513,16 @@ export const agentLifecycleMachine = setup({
       }
     },
     sendSessionUpdateOnActivation: ({ context }) => {
-      const { dc, currentAgentConfig, logClientEvent, eventBus } = context;
+      const { dc, currentAgentConfig, logClientEvent, eventBus, isAudioPlaybackEnabled } = context;
       if (dc && dc.readyState === 'open' && currentAgentConfig) {
+        const modalities = isAudioPlaybackEnabled ? ["text", "audio"] : ["text"];
         const sessionUpdatePayload = {
           type: "session.update",
           session: {
-            modalities: ["text", "audio"], // Default or derive from agentConfig if available
+            modalities: modalities,
             instructions: currentAgentConfig.instructions,
-            voice: currentAgentConfig.voice || "shimmer", // Default voice if not specified
-            input_audio_transcription: { model: "whisper-1" }, // Default or derive
+            voice: currentAgentConfig.voice || "shimmer",
+            input_audio_transcription: { model: "whisper-1" },
             tools: currentAgentConfig.tools || [],
           }
         };
@@ -593,7 +605,7 @@ export const agentLifecycleMachine = setup({
             }
             const tempAudioElementRef = { current: audioElement };
 
-            const { pc, dc } = await createRealtimeConnection(EPHEMERAL_KEY, tempAudioElementRef, urlCodec);
+            const { pc, dc } = await createRealtimeConnection(EPHEMERAL_KEY, tempAudioElementRef, urlCodec, isAudioPlaybackEnabled);
             
             if (dc) {
               dc.onopen = () => {

@@ -3,7 +3,8 @@ import { RefObject } from "react";
 export async function createRealtimeConnection(
   EPHEMERAL_KEY: string,
   audioElement: RefObject<HTMLAudioElement | null>,
-  codec: string
+  codec: string,
+  enableAudio: boolean
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel }> {
   console.log('[RTCSetup] Creating realtime connection...');
   // Configure RTCPeerConnection with explicit STUN servers
@@ -37,15 +38,19 @@ export async function createRealtimeConnection(
   };
 
   // Add explicit audio transceiver for receiving agent audio
-  console.log('[RTCSetup] Adding audio transceiver for receiving');
-  if (typeof pc.addTransceiver === 'function') {
-    try {
-      pc.addTransceiver('audio', { direction: 'recvonly' });
-    } catch (e) {
-      console.error('[RTCSetup] Error adding recvonly audio transceiver:', e);
+  if (enableAudio) {
+    console.log('[RTCSetup] Adding audio transceiver for receiving');
+    if (typeof pc.addTransceiver === 'function') {
+      try {
+        pc.addTransceiver('audio', { direction: 'recvonly' });
+      } catch (e) {
+        console.error('[RTCSetup] Error adding recvonly audio transceiver:', e);
+      }
+    } else {
+      console.warn('[RTCSetup] pc.addTransceiver is not a function. Cannot add recvonly audio transceiver explicitly.');
     }
   } else {
-    console.warn('[RTCSetup] pc.addTransceiver is not a function. Cannot add recvonly audio transceiver explicitly.');
+    console.log('[RTCSetup] Skipping audio transceiver setup (enableAudio is false)');
   }
 
   // Store received tracks/streams if the audio element isn't ready
@@ -54,8 +59,7 @@ export async function createRealtimeConnection(
   pc.ontrack = (e: RTCTrackEvent) => {
     console.log(`[RTCSetup] Track received: ${e.track.kind}`);
     
-    // Explicitly handle all track events, even if not audio
-    if (e.track.kind === 'audio') {
+    if (enableAudio && e.track.kind === 'audio') {
       console.log('[RTCSetup] Audio track received');
       
       // Track state change events for debugging
@@ -94,6 +98,9 @@ export async function createRealtimeConnection(
           }
         }, 10000);
       }
+    } else if (e.track.kind === 'audio') { // Audio track received but enableAudio is false
+      console.log('[RTCSetup] Audio track received but enableAudio is false, ignoring.');
+      e.track.stop(); // Stop the track to release resources if possible
     } else if (e.track.kind === 'video') {
       console.log('[RTCSetup] Video track received (ignoring)');
     }
@@ -127,14 +134,22 @@ export async function createRealtimeConnection(
     }
   }
 
-  try {
-    const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
-    // Add microphone track, which creates a transceiver
-    pc.addTrack(ms.getTracks()[0]);
-    console.log('[RTCSetup] Microphone track added');
-  } catch (err) {
-    console.error('[RTCSetup] getUserMedia failed:', err);
-    throw err;
+  if (enableAudio) {
+    try {
+      const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Add microphone track, which creates a transceiver
+      pc.addTrack(ms.getTracks()[0]);
+      console.log('[RTCSetup] Microphone track added');
+    } catch (err) {
+      console.error('[RTCSetup] getUserMedia failed (this might be expected if enableAudio is true but mic is denied):', err);
+      // If audio is enabled but mic fails, we might still want to proceed for receiving audio.
+      // However, the original code throws here, so we maintain that behavior unless specified otherwise.
+      // If the user specifically denies mic, this will throw NotAllowedError.
+      // If no mic is present, it might throw NotFoundError or OverconstrainedError.
+      throw err; 
+    }
+  } else {
+    console.log('[RTCSetup] Skipping getUserMedia and addTrack for microphone (enableAudio is false)');
   }
 
   // Create data channel for events

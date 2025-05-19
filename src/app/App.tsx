@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, /* useRef, */ useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, usePathname } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
 
 import Image from "next/image";
@@ -9,7 +9,8 @@ import Image from "next/image";
 // UI components
 import Transcript from "@/app/components/Transcript";
 import Events from "@/app/components/Events";
-import BottomToolbar from "@/app/components/BottomToolbar";
+import SettingsButton from "@/app/components/Settings/SettingsButton";
+import SettingsModal from "@/app/components/Settings/SettingsModal";
 
 // Types
 import { AgentConfig } from "@/app/types";
@@ -33,10 +34,13 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8
 
 function AppContents() {
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const agentLifecycle = useAgentLifecycle();
   const eventBus = useEventBus();
   useToolExecutor();
   useTranscriptGuardrails();
+
+  const isWritePage = pathname === "/cases/kato/write";
 
   // Derive state from XState machine
   const xstateSessionStatus = agentLifecycle.state.context.sessionStatus;
@@ -215,6 +219,10 @@ function AppContents() {
   }, [xstateDc, addTranscriptMessage, logClientEvent]);
 
   const handleAudioInput = useCallback((audioBlob: Blob, durationMillis: number) => {
+    if (isWritePage) {
+      console.log("[AppContents] Audio input ignored on write page.");
+      return;
+    }
     if (xstateDc && xstateDc.readyState === "open") {
       const messageId = uuidv4();
       const reader = new FileReader();
@@ -236,7 +244,7 @@ function AppContents() {
       console.error("Data channel not open. Cannot send audio.");
        addTranscriptMessage(uuidv4(), "system", "Error: Connection not established. Cannot send audio.", true);
     }
-  }, [xstateDc, addTranscriptMessage, logClientEvent]);
+  }, [xstateDc, addTranscriptMessage, logClientEvent, isWritePage]);
 
   // UI rendering
   return (
@@ -254,22 +262,9 @@ function AppContents() {
             Mr Kato - Realtime Patient Simulator
           </h1>
         </div>
-
-        <select
-          value={xstateSelectedAgentName || ""}
-          onChange={(e) => handleAgentSelection(e.target.value)}
-          className="p-2 border rounded-md bg-white dark:bg-gray-800 dark:text-white dark:border-gray-600 text-sm"
-          disabled={agentLifecycle.state.matches('connecting') || agentLifecycle.state.matches('disconnectingForSwitch')}
-        >
-          <option value="" disabled>
-            Select Agent
-          </option>
-          {selectedAgentConfigSet.map((agent) => (
-            <option key={agent.name} value={agent.name}>
-              {agent.displayName || agent.name}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <SettingsButton />
+        </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
@@ -288,6 +283,7 @@ function AppContents() {
             micAccessError={micAccessError}
             onMicAccessError={() => setMicAccessError(true)}
             onMicAccessRecovered={() => setMicAccessError(false)}
+            micDisabled={isWritePage}
           />
         </main>
         <aside className="w-1/3 lg:w-1/4 p-1 md:p-2 border-l dark:border-gray-700 overflow-y-auto bg-gray-50 dark:bg-gray-800">
@@ -295,20 +291,21 @@ function AppContents() {
         </aside>
       </div>
 
-      <BottomToolbar
-        sessionStatus={xstateSessionStatus as "CONNECTING" | "DISCONNECTED" | "CONNECTED" | "ERROR"}
-        onToggleConnection={handleConnectDisconnect}
-        agentName={xstateCurrentAgentConfig?.displayName || xstateSelectedAgentName || "No Agent"}
-        isAgentActive={agentLifecycle.state.matches('agentActive')}
-        isConnecting={agentLifecycle.state.matches('connecting')}
-        isSwitching={agentLifecycle.state.matches('preparingToSwitch') || agentLifecycle.state.matches('disconnectingForSwitch')}
-        isError={!!xstateError}
-        errorMessage={typeof xstateError === 'string' ? xstateError : (xstateError && typeof xstateError === 'object' && 'message' in xstateError ? String(xstateError.message) : "An unknown error occurred")}
-        isOutputAudioBufferActive={isOutputAudioBufferActive}
-        audioInputMode={audioInputMode}
-        onAudioInputModeChange={(mode: string) => eventBus.emit(KatoEvents.USER_REQUESTED_AUDIO_INPUT_MODE_CHANGE, mode)}
-        isMicAccessError={micAccessError}
-      />
+      {showMicDeniedModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl dark:bg-gray-800">
+            <h2 className="text-xl font-semibold mb-4 dark:text-white">Microphone Access Denied</h2>
+            <p className="mb-4 dark:text-gray-300">Kato needs microphone access to function. Please enable it in your browser settings.</p>
+            <button 
+              onClick={() => setShowMicDeniedModal(false)}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+      <SettingsModal />
     </div>
   );
 }

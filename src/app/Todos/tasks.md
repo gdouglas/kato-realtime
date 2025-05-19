@@ -1,0 +1,15 @@
+# Todo tasks:
+- [ ] Clean up all the different layout files.
+- [ ] Clarify what the app.tsx file does.
+- [ ] Remove the transcription components and contexts as they are not working.
+- [ ] Add information about the audio output quality from openAI. this will be a debugging thing.
+- [ ] Get LTI integration or CWL configuration
+- [ ] Get the Text mode working.
+- [ ] Make sure that text mode is initialized if mic is not allowed.
+- [ ] Get the DDX wizard working. 
+- [ ] Get a feedback system working. 
+- [ ] Get the guardrails working.
+- [ ] Create guardrails 
+- [ ] Have conditional logic run if guardrails fail.
+- [ ] Help and settings modals
+- [ ] Settings for choosing mic and audio devices

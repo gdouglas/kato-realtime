@@ -131,13 +131,19 @@ export interface ServerSessionCreatedPayload {
 export interface ServerTranscriptItemCreatedPayload {
   itemId: string;
   role: 'user' | 'assistant'; // From task description, adjust if KatoEvents.ts is more accurate
-  initialText: string; // From task description
+  text: string; // Changed back from initialText
   timestamp: number; // Added based on task description example
+  isHidden?: boolean; // Added to align with context usage
 }
 
 export interface ServerUserTranscriptCompletedPayload {
   itemId: string;
   transcript: string;
+}
+
+export interface ServerUserTranscriptDeltaPayload {
+  itemId: string;
+  deltaText: string;
 }
 
 export interface ServerAssistantDeltaReceivedPayload {
