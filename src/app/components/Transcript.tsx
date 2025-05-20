@@ -10,7 +10,7 @@ import { GuardrailChip } from "./GuardrailChip";
 
 export interface TranscriptProps {
   onSendText: (text: string) => Promise<void>;
-  onSendAudio: (audioBlob: Blob, durationMillis: number) => void;
+  onSendAudio?: (audioBlob: Blob, durationMillis: number) => void;
   currentUserInput: string;
   setCurrentUserInput: React.Dispatch<React.SetStateAction<string>>;
   currentAgentName?: string;

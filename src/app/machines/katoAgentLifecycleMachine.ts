@@ -267,9 +267,11 @@ export const agentLifecycleMachine = setup({
         return;
       }
 
-      // Log the raw server message before processing
+      // Log the raw server message before processing (except for audio_transcript.delta which is noisy)
       logServerEvent(serverMessage, `machine_processing_${serverMessage.type}`);
-      console.log(`[XState] processAndRelayServerMessage: Processing type '${serverMessage.type}'`, serverMessage);
+      if (serverMessage.type === 'response.audio_transcript.delta') {
+        console.log(`[XState] processAndRelayServerMessage: Processing type '${serverMessage.type}'`, serverMessage);
+      }
 
       switch (serverMessage.type) {
         case 'session.created':
@@ -281,6 +283,28 @@ export const agentLifecycleMachine = setup({
           } else {
             console.warn('[XState] Malformed session.created:', serverMessage);
           }
+          break;
+
+        case 'session.updated':
+          console.log('[XState] Received session.updated event:', serverMessage);
+          addTranscriptBreadcrumb('Session settings confirmed/updated by server.');
+          break;
+
+        case 'input_audio_buffer.speech_started':
+          console.log('[XState] Received input_audio_buffer.speech_started event:', serverMessage);
+          addTranscriptBreadcrumb('Server detected audio input buffer speech started.');
+          break;
+
+        case 'input_audio_buffer.speech_stopped':
+          console.log('[XState] Received input_audio_buffer.speech_stopped event:', serverMessage);
+          addTranscriptBreadcrumb('Server detected audio input buffer speech stopped.');
+          break;
+
+        case 'input_audio_buffer.committed':
+          console.log('[XState] Received input_audio_buffer.committed event:', serverMessage);
+          addTranscriptBreadcrumb('Server confirmed audio input buffer committed.');
+          // This event is important, especially in PTT scenarios or when VAD is off.
+          // It might signal that a user's audio segment is fully processed for input.
           break;
 
         case 'output_audio_buffer.started':
@@ -432,6 +456,55 @@ export const agentLifecycleMachine = setup({
           break;
         case 'input_audio_transcription.user_speech.stopped':
           eventBus.emit(KatoEvents.USER_SPEECH_STOPPED);
+          break;
+
+        case 'response.created':
+          console.log('[XState] Received response.created event:', serverMessage);
+          addTranscriptBreadcrumb('Server started creating a response.');
+          // Potential: emit KatoEvents.AGENT_RESPONSE_STARTED if UI needs to show a thinking state.
+          // const responseId = serverMessage.response?.id;
+          // if (responseId) eventBus.emit(KatoEvents.AGENT_RESPONSE_ID_RECEIVED, { responseId });
+          break;
+
+        case 'response.output_item.added':
+          console.log('[XState] Received response.output_item.added event:', serverMessage);
+          addTranscriptBreadcrumb('Server added an output item to the response.');
+          // const itemId = serverMessage.item?.id;
+          // const itemType = serverMessage.item?.type; // e.g., 'message', 'function_call'
+          // Useful for pre-initializing UI elements for incoming response items.
+          break;
+
+        case 'response.content_part.added':
+          console.log('[XState] Received response.content_part.added event:', serverMessage);
+          // This is granular. Might be useful for complex multi-modal content.
+          // addTranscriptBreadcrumb('Server added a content part to an output item.');
+          break;
+
+        case 'response.audio.done':
+          console.log('[XState] Received response.audio.done event:', serverMessage);
+          addTranscriptBreadcrumb('Server finished generating audio for a response item.');
+          // const itemId = serverMessage.item_id;
+          // Could be used to enable UI like "replay audio" once full server-side generation is confirmed.
+          break;
+
+        case 'response.audio_transcript.done':
+          console.log('[XState] Received response.audio_transcript.done event:', serverMessage);
+          addTranscriptBreadcrumb('Server finished transcribing audio for a response item.');
+          // const itemId = serverMessage.item_id;
+          // const transcript = serverMessage.transcript;
+          // This might be useful if you need the final transcript of the agent's speech separately.
+          break;
+
+        case 'response.content_part.done':
+          console.log('[XState] Received response.content_part.done event:', serverMessage);
+          // addTranscriptBreadcrumb('Server completed a content part of an output item.');
+          // This is very granular, logging is likely sufficient unless specific UI updates are tied to it.
+          break;
+
+        case 'rate_limits.updated':
+          console.log('[XState] Received rate_limits.updated event:', serverMessage);
+          addTranscriptBreadcrumb('Server provided rate limit update.');
+          // Useful for monitoring. Could potentially parse serverMessage.rate_limits for specific limits.
           break;
 
         default:

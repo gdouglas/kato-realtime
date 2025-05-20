@@ -49,6 +49,7 @@ function AppContents() {
   const xstateError = agentLifecycle.state.context.error;
   const xstateDc = agentLifecycle.state.context.dc;
   const xstatePc = agentLifecycle.state.context.pc;
+  const xstatePushToTalk = agentLifecycle.state.context.pushToTalk;
 
   const urlCodec = searchParams.get("codec") || "opus";
   const initialAgentName = searchParams.get("agent") || undefined;
@@ -66,10 +67,8 @@ function AppContents() {
   const selectedAgentConfigSet = allAgentSets[selectedAgentConfigSetKey];
 
   const [userResponseSuggestions, setUserResponseSuggestions] = useState<string[]>([]);
-  const [isOutputAudioBufferActive, setIsOutputAudioBufferActive] = useState(false);
-  const [showMicDeniedModal, setShowMicDeniedModal] = useState(false);
   const [micAccessError, setMicAccessError] = useState(false);
-  const [audioInputMode, setAudioInputMode] = useState<string>("push_to_talk");
+  const audioInputMode = xstatePushToTalk ? "ptt" : "conversation";
   const [currentUserInput, setCurrentUserInput] = useState<string>("");
 
   const [isFunctionCallInProgress, setIsFunctionCallInProgress] = useState(false);
@@ -98,11 +97,6 @@ function AppContents() {
   }, [xstateCurrentAgentConfig, agentLifecycle.state, addTranscriptMessage]);
 
   useEffect(() => {
-    const handleShowMicDenied = () => setShowMicDeniedModal(true);
-    const handleAudioInputModeChanged = (mode: string) => setAudioInputMode(mode);
-    const handleOutputAudioBufferStatusChanged = (isActive: boolean) => {
-      setIsOutputAudioBufferActive(isActive);
-    };
     const handleOutputAudioBufferClearRequested = () => {
       console.log("[AppContents] Event: OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED. Audio element is managed by RootLayout/AgentLifecycleMachine.");
     };
@@ -129,9 +123,6 @@ function AppContents() {
       setMicAccessError(false);
     };
 
-    const unsubShowMicDenied = eventBus.on(KatoEvents.SHOW_MIC_DENIED_MODAL_REQUESTED, handleShowMicDenied);
-    const unsubAudioInputMode = eventBus.on(KatoEvents.AUDIO_INPUT_MODE_CHANGED, handleAudioInputModeChanged);
-    const unsubOutputAudioStatus = eventBus.on(KatoEvents.OUTPUT_AUDIO_BUFFER_STATUS_CHANGED, handleOutputAudioBufferStatusChanged);
     const unsubOutputAudioClear = eventBus.on(KatoEvents.OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED, handleOutputAudioBufferClearRequested);
     const unsubAgentSwitchCompleted = eventBus.on(KatoEvents.AGENT_SWITCH_COMPLETED, handleAgentSwitchCompleted);
     const unsubToolCallStarted = eventBus.on(KatoEvents.TOOL_CALL_STARTED, handleToolCallStarted);
@@ -140,9 +131,6 @@ function AppContents() {
     const unsubMicRecovered = eventBus.on(KatoEvents.MICROPHONE_ACCESS_RECOVERED, handleMicrophoneAccessRecovered);
 
     return () => {
-      unsubShowMicDenied();
-      unsubAudioInputMode();
-      unsubOutputAudioStatus();
       unsubOutputAudioClear();
       unsubAgentSwitchCompleted();
       unsubToolCallStarted();
@@ -218,34 +206,6 @@ function AppContents() {
     }
   }, [xstateDc, addTranscriptMessage, logClientEvent]);
 
-  const handleAudioInput = useCallback((audioBlob: Blob, durationMillis: number) => {
-    if (isWritePage) {
-      console.log("[AppContents] Audio input ignored on write page.");
-      return;
-    }
-    if (xstateDc && xstateDc.readyState === "open") {
-      const messageId = uuidv4();
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64Audio = (reader.result as string).split(',')[1];
-        const message = {
-          event: "user_audio",
-          message_id: messageId,
-          audio_data: base64Audio,
-          duration_millis: durationMillis,
-          mime_type: audioBlob.type, 
-          timestamp: new Date().toISOString(),
-        };
-        xstateDc.send(JSON.stringify(message));
-        logClientEvent({ message_id: messageId, duration_millis: durationMillis, mime_type: audioBlob.type }, "rtc.user_audio.sent");
-      };
-      reader.readAsDataURL(audioBlob);
-    } else {
-      console.error("Data channel not open. Cannot send audio.");
-       addTranscriptMessage(uuidv4(), "system", "Error: Connection not established. Cannot send audio.", true);
-    }
-  }, [xstateDc, addTranscriptMessage, logClientEvent, isWritePage]);
-
   // UI rendering
   return (
     <div className="flex flex-col h-screen bg-white dark:bg-gray-900">
@@ -271,7 +231,6 @@ function AppContents() {
         <main className="flex-1 flex flex-col p-1 md:p-2 overflow-y-auto">
           <Transcript
             onSendText={sendTextMessage}
-            onSendAudio={handleAudioInput}
             currentUserInput={currentUserInput}
             setCurrentUserInput={setCurrentUserInput}
             currentAgentName={xstateSelectedAgentName}
@@ -291,20 +250,6 @@ function AppContents() {
         </aside>
       </div>
 
-      {showMicDeniedModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg shadow-xl dark:bg-gray-800">
-            <h2 className="text-xl font-semibold mb-4 dark:text-white">Microphone Access Denied</h2>
-            <p className="mb-4 dark:text-gray-300">Kato needs microphone access to function. Please enable it in your browser settings.</p>
-            <button 
-              onClick={() => setShowMicDeniedModal(false)}
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
       <SettingsModal />
     </div>
   );
