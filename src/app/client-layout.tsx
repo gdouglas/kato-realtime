@@ -77,7 +77,6 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
           </EventProvider>
         </TranscriptProvider>
       </EventBusProvider>
-      <audio ref={audioRef} id="app-wide-audio-player" className="hidden" />
     </>
   );
 } 

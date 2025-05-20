@@ -21,6 +21,10 @@ export interface AgentLifecycleMachineInput {
   logClientEvent: (eventObj: any, eventNameSuffix?: string) => void;
   logServerEvent: (eventObj: any, eventNameSuffix?: string) => void;
   isAudioPlaybackEnabled: boolean;
+  // Rename and keep optional for settings inputs
+  micEnabled?: boolean;
+  audioOutputEnabled?: boolean;
+  pushToTalk?: boolean;
   // handleServerEvent: (serverMessage: any) => void; // Removed
 }
 
@@ -50,6 +54,7 @@ export interface AgentLifecycleMachineContext {
   micEnabled?: boolean;
   audioOutputEnabled?: boolean;
   pushToTalk?: boolean;
+  justSkippedIntro?: boolean;
 }
 
 export type AgentLifecycleMachineEvent =
@@ -449,6 +454,21 @@ export const agentLifecycleMachine = setup({
       }
       return {};
     }),
+    sendSimulatedMessageOnSwitchAction: ({ context }) => {
+      if (context.justSkippedIntro && context.currentAgentConfig) {
+        console.log(`[XState] Agent ${context.currentAgentConfig.name} activated after switch, sending simulated message.`);
+        context.eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
+          eventObj: {
+            type: "conversation.user_request", 
+            payload: {
+              text: `User re-engaged with ${context.currentAgentConfig.name}.`,
+              is_simulated: true
+            }
+          },
+          eventNameSuffix: "simulated_agent_engagement_after_switch"
+        });
+      }
+    },
     // Action to emit CURRENT_AGENT_CHANGED - call after currentAgentConfig is set
     emitCurrentAgentChanged: ({ context }) => {
       if (context.currentAgentConfig && context.eventBus) {
@@ -519,17 +539,32 @@ export const agentLifecycleMachine = setup({
       }
     },
     sendSessionUpdateOnActivation: ({ context }) => {
-      const { dc, currentAgentConfig, logClientEvent, eventBus, isAudioPlaybackEnabled } = context;
+      const { dc, currentAgentConfig, logClientEvent, eventBus, isAudioPlaybackEnabled, pushToTalk } = context;
       if (dc && dc.readyState === 'open' && currentAgentConfig) {
         const modalities = isAudioPlaybackEnabled ? ["text", "audio"] : ["text"];
+        
+        let turnDetectionSettings: any = null;
+        // If pushToTalk is false (i.e., conversation mode), enable server-side VAD.
+        // Otherwise, turn_detection remains null (PTT mode, or no mic).
+        if (pushToTalk === false) {
+          turnDetectionSettings = {
+            type: "server_vad", 
+            threshold: 0.5, 
+            prefix_padding_ms: 300,
+            silence_duration_ms: 2000, 
+            create_response: true, // Important: Server waits for user speech before responding
+          };
+        }
+
         const sessionUpdatePayload = {
           type: "session.update",
           session: {
             modalities: modalities,
             instructions: currentAgentConfig.instructions,
             voice: currentAgentConfig.voice || "shimmer",
-            input_audio_transcription: { model: "whisper-1" },
+            input_audio_transcription: { model: "whisper-1" }, 
             tools: currentAgentConfig.tools || [],
+            turn_detection: turnDetectionSettings, // Add VAD settings here
           }
         };
         try {
@@ -568,6 +603,34 @@ export const agentLifecycleMachine = setup({
           success: false, 
           error: toolEvent.error 
         });
+      }
+    },
+    // New action to send "Hi" if intro was skipped
+    sendSimulatedHiIfIntroSkipped: ({ context }) => {
+      if (context.justSkippedIntro && context.dc && context.dc.readyState === 'open' && context.currentAgentConfig) {
+        console.log(`[XState Actions] Intro was skipped for ${context.currentAgentConfig.name}. Sending simulated 'Hi'.`);
+        const userHiMessage = {
+          type: "conversation.item.create",
+          item: {
+            source: { type: "user" },
+            type: "input_text",
+            content: [{ type: "text", text: "Hi" }],
+            timestamp: new Date().toISOString(),
+          },
+        };
+        const createResponseMessage = {
+          type: "response.create"
+        };
+
+        try {
+          context.dc.send(JSON.stringify(userHiMessage));
+          context.dc.send(JSON.stringify(createResponseMessage));
+          context.logClientEvent(userHiMessage, 'simulated_user_hi');
+          context.logClientEvent(createResponseMessage, 'simulated_response_create');
+        } catch (e) {
+          console.error("[XState Actions] Error sending simulated 'Hi' message:", e);
+        }
+        // The flag is reset when activatingAgent is re-entered.
       }
     },
   },
@@ -656,7 +719,6 @@ export const agentLifecycleMachine = setup({
       const currentContext = input as AgentLifecycleMachineContext;
       let { 
         currentAgentConfig,
-        // audioElement, // No longer take from context for this actor
         eventBus,
         isAudioPlaybackEnabled,
         logClientEvent,
@@ -674,11 +736,7 @@ export const agentLifecycleMachine = setup({
       logClientEvent({ agentName }, "play_intro_actor_started");
 
       console.log(`[XState Actor DEBUG] playAgentIntro: Creating a new Audio element for intro: ${agentName}`);
-      const localAudioElement = new Audio(); // Always use a fresh Audio element for intros
-
-      if (typeof isAudioPlaybackEnabled === 'boolean') {
-        localAudioElement.autoplay = isAudioPlaybackEnabled;
-      }
+      const localAudioElement = new Audio(); 
 
       let audioBlobUrl: string | null = null;
 
@@ -699,58 +757,114 @@ export const agentLifecycleMachine = setup({
           const errorData = await response.text();
           const errorMsg = `Failed to fetch intro audio for ${agentName}: ${response.status} ${errorData}`;
           console.error(`[XState Actor DEBUG] playAgentIntro: ${errorMsg}`);
-          throw new Error(errorMsg);
+          // No need to revokeObjectURL here as it's not created yet
+          return { agentName, success: false, error: errorMsg }; // Resolve promise directly on fetch error
         }
 
         const audioBlob = await response.blob();
         audioBlobUrl = URL.createObjectURL(audioBlob);
-        localAudioElement.src = audioBlobUrl;
-        if (localAudioElement.autoplay) { 
-            console.log("[XState Actor DEBUG] playAgentIntro: Attempting to honor autoplay after setting src.");
-        }
+        
+        return new Promise((resolve) => { 
+          let hasResolved = false; // Flag to prevent multiple resolves
+          const timeoutDuration = 10000; // 10 seconds
 
-        return new Promise((resolve, reject) => {
+          const resolveOnce = (value: any) => {
+            if (!hasResolved) {
+              hasResolved = true;
+              clearTimeout(playbackTimeoutId);
+              if (audioBlobUrl && value.success === false) { // Also revoke if we are resolving with error
+                  URL.revokeObjectURL(audioBlobUrl);
+              } else if (value.success === true && value.revokedAlready !== true) {
+                 // if success, onended will revoke. If we time out and treat as success (e.g. audio disabled), revoke here.
+              }
+              resolve(value);
+            }
+          };
+          
+          const playbackTimeoutId = setTimeout(() => {
+            if (!hasResolved) {
+              console.error(`[XState Actor DEBUG] playAgentIntro: TIMEOUT for ${agentName} - oncanplaythrough or onended not triggered within ${timeoutDuration}ms.`);
+              logClientEvent({ agentName, error: "Playback timeout" }, "play_intro_actor_timeout");
+              // No URL.revokeObjectURL here, let resolveOnce handle it
+              resolveOnce({ agentName, success: false, error: "Playback timeout", revokedAlready: audioBlobUrl ? false : true });
+            }
+          }, timeoutDuration);
+
           localAudioElement.onended = () => {
+            if (hasResolved) return;
             console.log(`[XState Actor DEBUG] playAgentIntro: onended triggered for ${agentName}.`);
             logClientEvent({ agentName }, "play_intro_actor_ended");
             if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
-            resolve({ agentName, success: true });
+            resolveOnce({ agentName, success: true, revokedAlready: true });
           };
 
           localAudioElement.onerror = (e) => {
-            console.error(`[XState Actor DEBUG] playAgentIntro: onerror triggered for ${agentName}.`, e);
-            logClientEvent({ agentName, error: (e instanceof ErrorEvent ? e.message : String(e)) }, "play_intro_actor_audio_error");
-            if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
-            resolve({ agentName, success: false, error: "Audio playback error" }); // Still resolve, but with success:false
+            if (hasResolved) return;
+            const errorMessage = (e instanceof ErrorEvent) ? e.message : 
+                                 (e instanceof Event && e.target && (e.target as HTMLAudioElement).error) ? (e.target as HTMLAudioElement).error?.message : 
+                                 'Unknown audio element error';
+            console.error(`[XState Actor DEBUG] playAgentIntro: localAudioElement.onerror triggered for ${agentName}. Error: ${errorMessage}`, e);
+            logClientEvent({ agentName, error: errorMessage }, "play_intro_actor_audio_element_error");
+            // No URL.revokeObjectURL here, let resolveOnce handle it
+            resolveOnce({ agentName, success: false, error: `Audio element error: ${errorMessage}`, revokedAlready: audioBlobUrl ? false : true });
           };
 
-          console.log(`[XState Actor DEBUG] playAgentIntro: Attempting to play intro for ${agentName}...`);
-          localAudioElement.play()
-            .then(() => {
-              console.log(`[XState Actor DEBUG] playAgentIntro: Playback started for ${agentName}.`);
-              logClientEvent({ agentName }, "play_intro_actor_playback_started");
-            })
-            .catch(playError => {
-              let errorType = "Playback failed";
-              let needsUserInteraction = false;
-              if (playError.name === "NotAllowedError") {
-                errorType = "Playback requires user interaction (NotAllowedError)";
-                needsUserInteraction = true;
-                console.warn(`[XState Actor DEBUG] playAgentIntro: Playback for ${agentName} requires user interaction.`);
-              } else {
-                console.error(`[XState Actor DEBUG] playAgentIntro: Error playing intro for ${agentName}: ${playError.message}`);
-              }
-              logClientEvent({ agentName, error: playError.message, name: playError.name }, "play_intro_actor_play_catch");
-              if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
-              resolve({ agentName, success: false, error: errorType, needsUserInteraction });
-            });
+          localAudioElement.oncanplaythrough = () => {
+            if (hasResolved) return;
+            console.log(`[XState Actor DEBUG] playAgentIntro: oncanplaythrough triggered for ${agentName}. Attempting to play.`);
+            if (isAudioPlaybackEnabled) {
+              localAudioElement.play()
+                .then(() => {
+                  console.log(`[XState Actor DEBUG] playAgentIntro: Playback started successfully for ${agentName}.`);
+                  logClientEvent({ agentName }, "play_intro_actor_playback_started");
+                  // 'onended' will handle successful resolution. Timeout still active.
+                })
+                .catch(playError => {
+                  if (hasResolved) return;
+                  let errorType = "Playback failed";
+                  let needsUserInteraction = false;
+                  if (playError instanceof Error) {
+                    if (playError.name === "NotAllowedError") {
+                      errorType = "Playback requires user interaction (NotAllowedError)";
+                      needsUserInteraction = true;
+                      console.warn(`[XState Actor DEBUG] playAgentIntro: Playback for ${agentName} requires user interaction. Name: ${playError.name}, Message: ${playError.message}`);
+                    } else {
+                      console.error(`[XState Actor DEBUG] playAgentIntro: Error playing intro for ${agentName}. Name: ${playError.name}, Message: ${playError.message}`);
+                    }
+                    logClientEvent({ agentName, error: playError.message, name: playError.name }, "play_intro_actor_play_catch");
+                  } else {
+                     console.error(`[XState Actor DEBUG] playAgentIntro: Non-Error object caught during play for ${agentName}:`, playError);
+                     logClientEvent({ agentName, error: String(playError), name: "UnknownPlayError" }, "play_intro_actor_play_catch_non_error");
+                  }
+                  // No URL.revokeObjectURL here, let resolveOnce handle it
+                  resolveOnce({ agentName, success: false, error: errorType, needsUserInteraction, revokedAlready: audioBlobUrl ? false : true });
+                });
+            } else {
+              console.log(`[XState Actor DEBUG] playAgentIntro: Audio playback is disabled for ${agentName}, not playing after canplaythrough.`);
+              // No URL.revokeObjectURL here, let resolveOnce handle it
+              resolveOnce({ agentName, success: true, revokedAlready: audioBlobUrl ? false : true }); // Success because playback was intentionally skipped
+            }
+          };
+          
+          console.log(`[XState Actor DEBUG] playAgentIntro: Setting src for ${agentName}: ${audioBlobUrl}`);
+          if (audioBlobUrl) { 
+            localAudioElement.src = audioBlobUrl;
+            console.log(`[XState Actor DEBUG] playAgentIntro: src for ${agentName} has been set. Waiting for events...`);
+          } else {
+            console.error(`[XState Actor DEBUG] playAgentIntro: audioBlobUrl is null when trying to set src for ${agentName}. This indicates a fetch issue not caught earlier.`);
+            // No URL.revokeObjectURL here, let resolveOnce handle it
+            resolveOnce({ agentName, success: false, error: "audioBlobUrl was null before setting src", revokedAlready: true });
+          }
         });
 
-      } catch (error: any) {
-        console.error(`[XState Actor DEBUG] playAgentIntro: Outer catch for ${agentName}: ${error.message}`);
-        logClientEvent({ agentName, error: error.message }, "play_intro_actor_general_error");
-        if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
-        return { agentName, success: false, error: error.message, needsUserInteraction: error.name === "NotAllowedError" };
+      } catch (error: any) { // This catch is for the fetch operation mainly
+        console.error(`[XState Actor DEBUG] playAgentIntro: Outer catch for ${agentName} (likely fetch error): ${error.message}`, error);
+        logClientEvent({ agentName, error: error.message, name: error.name }, "play_intro_actor_general_error");
+        if (audioBlobUrl) { // Should be null if fetch failed, but good practice
+          URL.revokeObjectURL(audioBlobUrl);
+        }
+        const needsInteraction = error.name === "NotAllowedError"; // Unlikely for fetch, but for completeness
+        return { agentName, success: false, error: error.message, needsUserInteraction: needsInteraction };
       }
     }),
     disconnectRTC: fromPromise(async ({ input }) => {
@@ -823,32 +937,24 @@ export const agentLifecycleMachine = setup({
 }).createMachine({
   id: 'katoAgentLifecycle',
   initial: 'idle',
-  context: ({ input }) => ({
-    agentConfigs: input.agentConfigs,
-    urlCodec: input.urlCodec,
-    audioElement: input.audioElement,
-    eventBus: input.eventBus,
-    addTranscriptBreadcrumb: input.addTranscriptBreadcrumb,
-    logClientEvent: input.logClientEvent,
-    logServerEvent: input.logServerEvent,
-    isAudioPlaybackEnabled: input.isAudioPlaybackEnabled,
-
+  context: ({ input }: { input: AgentLifecycleMachineInput }) => ({
+    // Spread the input from useMachine
+    ...input,
+    // Default values for other context fields
     selectedAgentName: undefined,
     currentAgentConfig: null,
     error: undefined,
     playedAgentIntros: new Set<string>(),
-    sessionStatus: 'DISCONNECTED',
+    sessionStatus: 'DISCONNECTED' as const,
     pc: null,
     dc: null,
-
-    // Added for enhanced event emission
     previousAgentName: undefined,
     isSwitchingGlobal: false,
-
-    // Settings
+    justSkippedIntro: false,
+    // ---SETTINGS DEFAULTS---
     micEnabled: true,
     audioOutputEnabled: true,
-    pushToTalk: true,
+    pushToTalk: false, // Default to conversation mode as per requirement
   }),
   on: {
     RTC_CONNECTED: {
@@ -975,10 +1081,18 @@ export const agentLifecycleMachine = setup({
           }
         },
         'findAgentConfigAction',
-        // Log currentAgentConfig before emitting change
         ({context}) => console.log('[XState DEBUG] ActivatingAgent: currentAgentConfig before emitCurrentAgentChanged:', context.currentAgentConfig?.name),
         'emitCurrentAgentChanged',
-        'logBreadcrumbActivating'
+        'logBreadcrumbActivating',
+        assign({
+          justSkippedIntro: ({ context }) => {
+            const agentConfig = context.currentAgentConfig;
+            // If no agent or no intro text, consider intro skipped.
+            if (!agentConfig || !agentConfig.introAudio?.text) return true; 
+            // Otherwise, skipped if already played.
+            return context.playedAgentIntros.has(agentConfig.name); 
+          }
+        })
       ],
       on: {
         _INTERNAL_MARK_SWITCH_START_AND_EMIT: {
@@ -1082,6 +1196,8 @@ export const agentLifecycleMachine = setup({
         'assignRtcEventHandlers',
         'sendSessionUpdateOnActivation',
         'logBreadcrumbAgentActive',
+        'sendSimulatedHiIfIntroSkipped',
+        assign({ justSkippedIntro: false }),
         ({ context, self }) => {
           if (context.isSwitchingGlobal) {
             self.send({ type: '_INTERNAL_COMPLETE_SWITCH' } as any);

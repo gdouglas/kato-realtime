@@ -140,13 +140,17 @@ export async function createRealtimeConnection(
       // Add microphone track, which creates a transceiver
       pc.addTrack(ms.getTracks()[0]);
       console.log('[RTCSetup] Microphone track added');
-    } catch (err) {
-      console.error('[RTCSetup] getUserMedia failed (this might be expected if enableAudio is true but mic is denied):', err);
-      // If audio is enabled but mic fails, we might still want to proceed for receiving audio.
-      // However, the original code throws here, so we maintain that behavior unless specified otherwise.
-      // If the user specifically denies mic, this will throw NotAllowedError.
-      // If no mic is present, it might throw NotFoundError or OverconstrainedError.
-      throw err; 
+    } catch (err: any) {
+      console.error('[RTCSetup] getUserMedia failed:', err);
+      if (err.name === "NotFoundError") {
+        console.warn('[RTCSetup] Microphone not found (NotFoundError), proceeding in listen-only mode for user audio input.');
+      } else if (err.name === "NotAllowedError") {
+        console.warn('[RTCSetup] Microphone access denied by user (NotAllowedError).');
+        throw err; 
+      } else {
+        console.error('[RTCSetup] Unhandled getUserMedia error, re-throwing.');
+        throw err;
+      }
     }
   } else {
     console.log('[RTCSetup] Skipping getUserMedia and addTrack for microphone (enableAudio is false)');
@@ -229,19 +233,42 @@ export async function setMicrophoneEnabled(pc: RTCPeerConnection, enabled: boole
   const audioSender = pc.getSenders().find(sender => sender.track && sender.track.kind === 'audio');
   if (enabled) {
     // Add or replace with a new mic track
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const newTrack = stream.getAudioTracks()[0];
-    if (audioSender) {
-      await audioSender.replaceTrack(newTrack);
-    } else {
-      pc.addTrack(newTrack);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const newTrack = stream.getAudioTracks()[0];
+      if (audioSender) {
+        console.log('[RTCSetup] setMicrophoneEnabled: Replacing track');
+        await audioSender.replaceTrack(newTrack);
+      } else {
+        console.log('[RTCSetup] setMicrophoneEnabled: Adding new track');
+        pc.addTrack(newTrack);
+      }
+      console.log('[RTCSetup] setMicrophoneEnabled: Microphone track active.');
+    } catch (err: any) {
+      console.error('[RTCSetup] setMicrophoneEnabled: getUserMedia failed:', err);
+      if (err.name === "NotFoundError") {
+        console.warn('[RTCSetup] setMicrophoneEnabled: Microphone not found (NotFoundError). PTT might not function until a mic is available.');
+        // Do not throw. If a track existed and was meant to be replaced, it might remain or be null.
+        // If no sender existed, no track is added.
+      } else if (err.name === "NotAllowedError") {
+        console.warn('[RTCSetup] setMicrophoneEnabled: Microphone access denied by user (NotAllowedError).');
+        // Optionally, re-throw or emit an event to inform UI
+        throw err; // Or handle by, e.g., forcing PTT off in UI
+      } else {
+        console.error('[RTCSetup] setMicrophoneEnabled: Unhandled getUserMedia error, re-throwing.');
+        throw err;
+      }
     }
   } else {
     // Remove or disable the mic track
+    console.log('[RTCSetup] setMicrophoneEnabled: Disabling microphone track.');
     if (audioSender) {
-      await audioSender.replaceTrack(null);
-      if (audioSender.track) audioSender.track.stop();
+      await audioSender.replaceTrack(null); // replaceTrack(null) is the correct way to remove/stop sending
+      if (audioSender.track) { // The track itself on the sender might still exist but is stopped by replaceTrack(null)
+        // audioSender.track.stop(); // stop() is usually called on the original track if you manage it explicitly
+      }
     }
+    console.log('[RTCSetup] setMicrophoneEnabled: Microphone track disabled/removed.');
   }
 }
 

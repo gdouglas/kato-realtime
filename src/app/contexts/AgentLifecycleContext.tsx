@@ -69,6 +69,10 @@ export const AgentLifecycleProvider: React.FC<AgentLifecycleProviderProps> = ({
     logClientEvent,
     logServerEvent,
     isAudioPlaybackEnabled,
+    // Provide default values for the settings input fields
+    micEnabled: true,
+    audioOutputEnabled: true,
+    pushToTalk: false, // Default to conversation mode (pushToTalk disabled)
   };
 
   const [state, send, actorRef] = useMachine(agentLifecycleMachine, {

@@ -142,6 +142,7 @@ export const KatoRTCProvider: React.FC<{ children: React.ReactNode }> = ({ child
           const newValue = typeof valueOrFn === 'function' 
             ? (valueOrFn as (prevState: boolean) => boolean)(isAudioPlaybackEnabled) 
             : valueOrFn;
+          console.log("[KatoRTCContext] setIsAudioPlaybackEnabled called with value:", newValue);
           eventBus.emit(KatoEvents.AUDIO_PLAYBACK_ENABLED_CHANGED, newValue);
           // Consider sending an event to XState machine here if it needs to know about this change.
           // agentLifecycle.send({ type: 'SET_AUDIO_PLAYBACK_ENABLED', enabled: newValue });

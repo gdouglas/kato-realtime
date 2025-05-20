@@ -1,31 +1,37 @@
 import React, { useEffect, useState } from "react";
 import { useEventBus } from "@/app/contexts/EventBusContext";
 import { KatoEvents } from "@/app/cases/kato/KatoEvents";
+import { useAgentLifecycle } from "@/app/contexts/AgentLifecycleContext";
 
-interface SettingsModalProps {
-  initialSettings?: {
-    micEnabled: boolean;
-    audioOutputEnabled: boolean;
-    pushToTalk: boolean;
-  };
-}
+// initialSettings prop is no longer the primary source of truth for display
+interface SettingsModalProps {}
 
-const SettingsModal: React.FC<SettingsModalProps> = ({ initialSettings }) => {
+const SettingsModal: React.FC<SettingsModalProps> = () => {
   const eventBus = useEventBus();
+  const agentLifecycle = useAgentLifecycle();
+  const { micEnabled: globalMicEnabled, audioOutputEnabled: globalAudioOutputEnabled, pushToTalk: globalPushToTalk } = agentLifecycle.state.context;
+
   const [open, setOpen] = useState(false);
-  const [micEnabled, setMicEnabled] = useState(initialSettings?.micEnabled ?? true);
-  const [audioOutputEnabled, setAudioOutputEnabled] = useState(initialSettings?.audioOutputEnabled ?? true);
-  const [pushToTalk, setPushToTalk] = useState(initialSettings?.pushToTalk ?? true);
+  // Local state for checkboxes, initialized from global state when modal opens
+  const [micEnabled, setMicEnabled] = useState(globalMicEnabled ?? true);
+  const [audioOutputEnabled, setAudioOutputEnabled] = useState(globalAudioOutputEnabled ?? true);
+  const [pushToTalk, setPushToTalk] = useState(globalPushToTalk ?? false); // Default to false to match XState initial
 
   // Listen for open/close events
   useEffect(() => {
-    const unsubOpen = eventBus.on(KatoEvents.USER_REQUESTED_OPEN_SETTINGS_MODAL, () => setOpen(true));
+    const unsubOpen = eventBus.on(KatoEvents.USER_REQUESTED_OPEN_SETTINGS_MODAL, () => {
+      setOpen(true);
+      // When modal opens, sync its local state with the global XState context
+      setMicEnabled(agentLifecycle.state.context.micEnabled ?? true);
+      setAudioOutputEnabled(agentLifecycle.state.context.audioOutputEnabled ?? true);
+      setPushToTalk(agentLifecycle.state.context.pushToTalk ?? false);
+    });
     const unsubClose = eventBus.on(KatoEvents.USER_REQUESTED_CLOSE_SETTINGS_MODAL, () => setOpen(false));
     return () => {
       unsubOpen();
       unsubClose();
     };
-  }, [eventBus]);
+  }, [eventBus, agentLifecycle.state.context]); // Add agentLifecycle.state.context to deps
 
   // Close on ESC
   useEffect(() => {
