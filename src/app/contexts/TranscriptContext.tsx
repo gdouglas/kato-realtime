@@ -307,6 +307,10 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
 
     const handleServerTranscriptItemCreated = (data: ServerTranscriptItemCreatedPayload) => {
       console.log("[TranscriptContext] Event: SERVER_TRANSCRIPT_ITEM_CREATED", data);
+      
+      // Ensure we have a meaningful text value, not just a placeholder
+      const displayText = data.text || "[Processing...]";
+      
       setTranscriptItems((prev) => {
         // First check if item already exists, update it if so
         if (prev.some((item) => item.itemId === data.itemId)) {
@@ -316,7 +320,7 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
               const updatedItem: TranscriptItem = { 
                 ...item, 
                 role: data.role, 
-                title: data.text, 
+                title: displayText, 
                 status: data.role === 'user' ? "DONE" : "IN_PROGRESS" as const, 
                 isHidden: !!data.isHidden,
                 agentName: data.agentName // Always use the received agent name
@@ -340,7 +344,7 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
           itemId: data.itemId,
           type: "MESSAGE",
           role: data.role,
-          title: data.text,
+          title: displayText,
           expanded: false,
           timestamp: newTimestampPretty(),
           createdAtMs: Date.now(),
@@ -381,11 +385,24 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
     const handleServerUserTranscriptCompleted = (data: ServerUserTranscriptCompletedPayload) => {
       console.log("[TranscriptContext] Event: SERVER_USER_TRANSCRIPT_COMPLETED", data);
       setTranscriptItems((prev) =>
-        prev.map((item) =>
-          item.itemId === data.itemId && item.type === "MESSAGE" && item.role === "user"
-            ? { ...item, title: data.transcript, status: "DONE" }
-            : item
-        )
+        prev.map((item) => {
+          if (item.itemId === data.itemId && item.type === "MESSAGE" && item.role === "user") {
+            const updatedItem = {
+              ...item,
+              title: data.transcript,
+              status: "DONE" as const
+            };
+            
+            // Make sure to update the agent-specific context
+            if (item.agentName) {
+              updateAgentContext(updatedItem);
+              console.log(`[TranscriptContext] Updated user message in ${item.agentName}'s context: ${item.itemId}`);
+            }
+            
+            return updatedItem;
+          }
+          return item;
+        })
       );
     };
 
@@ -394,11 +411,22 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
       setTranscriptItems((prev) =>
         prev.map((item) => {
           if (item.itemId === data.itemId && item.type === "MESSAGE" && item.role === "user") {
-            return {
+            const newTitle = item.title === USER_PROCESSING_PLACEHOLDER ? 
+              data.deltaText : 
+              (item.title ?? "") + data.deltaText;
+              
+            const updatedItem = {
               ...item,
-              title: item.title === USER_PROCESSING_PLACEHOLDER ? data.deltaText : (item.title ?? "") + data.deltaText,
-              status: "IN_PROGRESS",
+              title: newTitle,
+              status: "IN_PROGRESS" as const
             };
+            
+            // Also update the agent-specific context with the incremental transcript
+            if (item.agentName) {
+              updateAgentContext(updatedItem);
+            }
+            
+            return updatedItem;
           }
           return item;
         })
@@ -431,13 +459,28 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
         data.fullText = "[Message content unavailable]";
       }
       
-      setTranscriptItems((prev) =>
-        prev.map((item) =>
-          item.itemId === data.itemId && item.type === "MESSAGE" && item.role === "assistant"
-            ? { ...item, title: data.fullText, status: "DONE" }
-            : item
-        )
-      );
+      setTranscriptItems((prev) => {
+        const newItems = prev.map((item) => {
+          if (item.itemId === data.itemId && item.type === "MESSAGE" && item.role === "assistant") {
+            const updatedItem = { 
+              ...item, 
+              title: data.fullText, 
+              status: "DONE" as const
+            };
+            
+            // Make sure to update the agent-specific context
+            if (item.agentName) {
+              updateAgentContext(updatedItem);
+              console.log(`[TranscriptContext] Updated assistant message in ${item.agentName}'s context: ${item.itemId}`);
+            }
+            
+            return updatedItem;
+          }
+          return item;
+        });
+        
+        return newItems;
+      });
     };
 
     const handleServerTranscriptItemStatusUpdate = (data: ServerTranscriptItemStatusUpdatePayload) => {

@@ -27,6 +27,7 @@ import KatoIntroScreen from "@/app/components/KatoIntroScreen";
 import CaseInfoModal from "@/app/components/CaseInfoModal";
 import AgentSwitcher from "@/app/components/AgentSwitcher/AgentSwitcher";
 import BottomBar from "@/app/components/BottomBar/BottomBar";
+import TokenCountDisplay from '@/app/components/TokenCountDisplay';
 
 // Utilities & Case Data
 import { katoCaseDetails } from "@/app/cases/kato/katoCaseData";
@@ -668,6 +669,10 @@ function KatoSpeakPageContent() {
       </div>
 
       <CaseInfoModal isOpen={isCaseInfoModalOpen} onClose={() => setIsCaseInfoModalOpen(false)} />
+      
+      {/* Token Count Display */}
+      <TokenCountDisplay />
+      
       <BottomBar 
         sessionStatus={sessionStatus}
         currentAgentConfig={currentAgentConfig}

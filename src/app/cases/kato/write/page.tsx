@@ -15,6 +15,8 @@ import KatoIntroScreen from "@/app/components/KatoIntroScreen";
 import AgentSwitcher from "@/app/components/AgentSwitcher/AgentSwitcher";
 import { KatoEvents } from '@/app/cases/kato/KatoEvents';
 import { v4 as uuidv4 } from "uuid";
+import { getAgentConversationTokenCounts } from "@/app/lib/tokenCounter";
+import TokenCountDisplay from "@/app/components/TokenCountDisplay";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -162,7 +164,29 @@ const WritePage = () => {
       !item.isHidden && 
       // Only show messages for the current agent
       (currentAgentConfig?.name ? item.agentName === currentAgentConfig.name : true)
-  );
+  ).map(item => {
+    // Make sure processing placeholders are replaced with meaningful content when available
+    if (item.title === '[Processing...]' || item.title === '[Assistant is responding...]') {
+      if (window.__AGENT_CONVERSATION_CONTEXTS__ && 
+          currentAgentConfig?.name && 
+          window.__AGENT_CONVERSATION_CONTEXTS__[currentAgentConfig.name]) {
+        
+        // Try to find a completed version of this message in the agent context
+        const agentContext = window.__AGENT_CONVERSATION_CONTEXTS__[currentAgentConfig.name];
+        const finalVersion = agentContext.find(m => 
+          m.itemId === item.itemId && 
+          m.title !== '[Processing...]' && 
+          m.title !== '[Assistant is responding...]'
+        );
+        
+        if (finalVersion && finalVersion.title) {
+          console.log(`[WritePage] Replacing placeholder title for ${item.itemId} with final content`);
+          return {...item, title: finalVersion.title};
+        }
+      }
+    }
+    return item;
+  });
 
   console.log(`[WritePage] Filtered ${transcriptItems.length} transcript items to ${messages.length} message items`);
   console.log(`[WritePage] Current agent: ${currentAgentConfig?.name}`);
@@ -378,6 +402,16 @@ const WritePage = () => {
         }
       });
       
+      // Calculate token counts for each agent
+      const tokenCounts = getAgentConversationTokenCounts();
+      console.log('Token counts per agent:');
+      Object.entries(tokenCounts).forEach(([name, data]) => {
+        console.log(`- ${name}: ${data.tokens} tokens (${data.messages} messages)`);
+      });
+      console.log('Total tokens across all agents:', 
+        Object.values(tokenCounts).reduce((sum, data) => sum + data.tokens, 0)
+      );
+      
       // Display agent contexts
       Object.entries(agentContexts).forEach(([name, messages]) => {
         console.log(`Agent ${name} has ${messages.length} messages:`);
@@ -428,7 +462,9 @@ const WritePage = () => {
             {messages.map((item) => (
               <li key={item.itemId} className={`p-3 rounded-lg ${item.role === 'user' ? 'bg-blue-50 dark:bg-blue-900 text-blue-800 dark:text-blue-200 ml-auto max-w-[80%]' : 'bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 max-w-[80%]'}`}>
                 <div className="flex items-center mb-1">
-                  <span className="font-semibold capitalize text-xs">{item.agentName == "preceptor" ? "Preceptor" : "Patient"}</span>
+                  <span className="font-semibold capitalize text-xs">
+                    {item.role === 'user' ? 'You' : (item.agentName === "preceptor" ? "Preceptor" : "Patient")}
+                  </span>
                   <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">{item.timestamp}</span>
                 </div>
                 <div className="whitespace-pre-wrap">{item.title}</div>
@@ -484,6 +520,9 @@ const WritePage = () => {
       >
         Debug Contexts
       </button>
+      
+      {/* Token Count Display */}
+      <TokenCountDisplay />
       
       <BottomBar 
         sessionStatus={sessionStatus as SessionStatus}
