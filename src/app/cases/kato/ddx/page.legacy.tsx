@@ -1,3 +1,9 @@
+// The ui button for this will open this file but it is not going to work.
+// This file is a legacy file that is no longer used.
+// It is kept here for reference purposes.
+// It is not used in the current implementation.
+// It is kept here for reference purposes.
+
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";

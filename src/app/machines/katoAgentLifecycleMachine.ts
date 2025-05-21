@@ -1,3 +1,24 @@
+/**
+ * This file defines the XState state machine responsible for managing the lifecycle of Kato agents
+ * and the Realtime WebRTC connection.
+ *
+ * Core Responsibilities:
+ * - Handling agent selection and switching logic.
+ * - Managing the WebRTC connection states (connecting, connected, disconnected, error).
+ * - Invoking actors for tasks like fetching tokens, connecting to WebRTC, playing agent intros, and disconnecting.
+ * - Processing messages received from the server via the WebRTC data channel.
+ * - Emitting events onto the global EventBus (`KatoEvents`) to inform other parts of the application
+ *   about lifecycle changes, server messages, and errors.
+ * - Listening to specific `KatoEvents` to trigger internal state transitions (e.g., user requests).
+ * - Maintaining context related to the current agent, connection status, RTC peer/data channel references, etc.
+ *
+ * When this machine is used:
+ * - It should be instantiated and started early in the application lifecycle (e.g., in `App.tsx`).
+ * - UI components and services interact with this machine primarily by sending it events (defined in its `events` type)
+ *   or by listening to events it emits on the global EventBus.
+ * - It centralizes the complex state logic associated with agent interaction and realtime communication,
+ *   promoting a clear separation of concerns and a predictable state management model.
+ */
 import { setup, createMachine, assign, fromPromise, sendTo, ActorRef } from 'xstate';
 import { AgentConfig } from '@/app/types';
 import { EventBus } from '@/app/lib/eventBus'; // Assuming path
@@ -76,6 +97,7 @@ export type AgentLifecycleMachineEvent =
   | { type: '_INTERNAL_MARK_SWITCH_START_AND_EMIT' }
   | { type: '_INTERNAL_COMPLETE_SWITCH' }
   | { type: '_INTERNAL_FAIL_SWITCH' }
+  | { type: '_RTC_SERVER_REPORTED_ERROR'; errorDetails: any }
   // Tool execution feedback events (from tool executor to machine)
   | { type: 'TOOL_EXECUTOR_SUCCESS'; callId: string; functionName: string; result: any }
   | { type: 'TOOL_EXECUTOR_FAILURE'; callId: string; functionName: string; error: any }
@@ -221,16 +243,19 @@ export const agentLifecycleMachine = setup({
         dc.onmessage = (event: MessageEvent) => {
           try {
             const serverMessage = JSON.parse(event.data);
-            // If it's a direct agent transfer request, send a specific machine event
-            if (serverMessage.type === 'session.transfer_agent.request' && serverMessage.agent_name) {
+            if (serverMessage.type === 'error') {
+              console.error('[XState] Server sent error message:', serverMessage.error);
+              self.send({ type: '_RTC_SERVER_REPORTED_ERROR', errorDetails: serverMessage });
+            } else if (serverMessage.type === 'session.transfer_agent.request' && serverMessage.agent_name) {
               console.log('[XState] Detected agent transfer request:', serverMessage.agent_name);
               self.send({ type: 'SERVER_REQUESTED_AGENT_TRANSFER', agentName: serverMessage.agent_name });
             } else {
-              // For other messages, send the generic RTC_SERVER_MESSAGE_RECEIVED
               self.send({ type: 'RTC_SERVER_MESSAGE_RECEIVED', serverMessage });
             }
           } catch (e) {
             console.error("[XState] Error parsing server message:", e);
+            // Optionally send a general parsing error to the machine
+            self.send({ type: 'RTC_CONNECTION_FAILED', error: 'Failed to parse server message' });
           }
         };
         dc.onclose = () => {
@@ -288,6 +313,7 @@ export const agentLifecycleMachine = setup({
         case 'session.updated':
           console.log('[XState] Received session.updated event:', serverMessage);
           addTranscriptBreadcrumb('Session settings confirmed/updated by server.');
+          eventBus.emit(KatoEvents.SERVER_SESSION_UPDATED_ACK, { serverMessage });
           break;
 
         case 'input_audio_buffer.speech_started':
@@ -355,11 +381,14 @@ export const agentLifecycleMachine = setup({
               itemId: serverMessage.item_id, 
               transcript: serverMessage.transcript 
             });
-            // Request agent response
-            eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
-              eventObj: { type: "response.create" },
-              eventNameSuffix: "response_create_after_user_transcript_completed_xstate_machine"
-            });
+            // Only explicitly request a response if in push-to-talk mode.
+            // In conversation mode with create_response:true, OpenAI handles this automatically.
+            if (context.pushToTalk) {
+              eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
+                eventObj: { type: "response.create" },
+                eventNameSuffix: "response_create_after_user_transcript_completed_ptt_xstate_machine"
+              });
+            }
           } else {
             console.warn('[XState] Malformed conversation.item.input_audio_transcription.completed:', serverMessage);
           }
@@ -624,7 +653,7 @@ export const agentLifecycleMachine = setup({
             type: "server_vad", 
             threshold: 0.5, 
             prefix_padding_ms: 300,
-            silence_duration_ms: 2000, 
+            silence_duration_ms: 500, // 500ms of silence to detect end of user speech
             create_response: true, // Important: Server waits for user speech before responding
           };
         }
@@ -685,10 +714,9 @@ export const agentLifecycleMachine = setup({
         const userHiMessage = {
           type: "conversation.item.create",
           item: {
-            source: { type: "user" },
-            type: "input_text",
-            content: [{ type: "text", text: "Hi" }],
-            timestamp: new Date().toISOString(),
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Hi" }],
           },
         };
         const createResponseMessage = {
@@ -1281,6 +1309,22 @@ export const agentLifecycleMachine = setup({
       on: {
         _INTERNAL_COMPLETE_SWITCH: {
           actions: ['emitAgentSwitchCompleted', assign({ isSwitchingGlobal: false })]
+        },
+        _RTC_SERVER_REPORTED_ERROR: { // Handler for server-sent errors
+          target: '#katoAgentLifecycle.connectionError',
+          actions: [
+            assign({ error: ({ event }) => event.errorDetails }),
+            'setErrorStatus',
+            ({context, event}) => {
+              const errorDetails = (event as any).errorDetails;
+              console.error(`[XState] Transitioning to connectionError due to server-reported error:`, errorDetails);
+              context.addTranscriptBreadcrumb(`Session failed: Server error - ${JSON.stringify(errorDetails.error)}`);
+              if (context.eventBus && errorDetails) {
+                context.eventBus.emit(KatoEvents.SERVER_SESSION_ERROR, { error: errorDetails });
+              }
+            },
+            'clearRtcRefs' 
+          ]
         },
         RTC_DISCONNECTED: [
           {

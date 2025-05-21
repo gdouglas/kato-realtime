@@ -1,3 +1,17 @@
+/**
+ * This file defines the comprehensive set of event types used throughout the Kato application.
+ * These events are dispatched and listened to via the global EventBus (`src/app/lib/eventBus.ts`)
+ * to enable decoupled communication between different modules, components, and services.
+ *
+ * When to use these events:
+ * - To signal user interactions from UI components to state machines or services.
+ * - For state machines to broadcast state changes or processed server messages to the rest of the app.
+ * - For services to announce updates or the completion of asynchronous operations.
+ * - To trigger actions in one part of the application in response to occurrences in another, without direct coupling.
+ *
+ * Each event is defined as a constant string and should be associated with a specific payload structure,
+ * ideally defined in `KatoEventPayloads.ts`, to ensure type safety and clarity.
+ */
 import * as Payloads from './KatoEventPayloads';
 
 /**
@@ -105,6 +119,14 @@ export const KatoEvents = {
   USER_CONFIRMED_AUDIO_MODAL: 'USER_CONFIRMED_AUDIO_MODAL' as const,
 
   // --- Application/System Events --- (Events originating from within the client application logic)
+
+  /**
+   * A generic error reported by the Realtime API server during an active session.
+   * Emitted by: `agentLifecycleMachine` when it receives an error-type message from the server.
+   * Consumed by: UI components for displaying error details, error reporting services.
+   * Payload: {@link Payloads.ServerSessionErrorPayload} // Assuming a new payload will be defined
+   */
+  SERVER_SESSION_ERROR: 'SERVER_SESSION_ERROR' as const,
 
   /**
    * Indicates that the session status is about to change. Allows components to prepare for a new status.
@@ -503,7 +525,7 @@ export const KatoEvents = {
    * A tool call (function call by the agent) has been initiated.
    * Emitted by: `agentLifecycleMachine` or tool execution orchestrator.
    * Consumed by: UI components (to show tool activity indicator).
-   * Payload: None. (Consider adding { callId, functionName } if needed by UI immediately)
+   * Payload: {@link Payloads.ToolCallStartedPayload} (e.g., { callId: string, functionName: string, argsString: string })
    */
   TOOL_CALL_STARTED: "TOOL_CALL_STARTED" as const,
 

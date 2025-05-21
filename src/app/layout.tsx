@@ -4,7 +4,7 @@ import ClientLayout from './client-layout';
 
 export const metadata: Metadata = {
   title: "Mr Kato - Realtime Patient Simulator",
-  description: "A demo app from OpenAI.",
+  description: "Exploring realtime patient simulation with AI.",
 };
 
 export default function RootLayout({

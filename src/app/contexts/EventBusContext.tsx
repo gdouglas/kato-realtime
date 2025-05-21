@@ -1,3 +1,24 @@
+/**
+ * This file defines a React Context and Provider for managing and distributing
+ * a global EventBus instance throughout the Kato application.
+ *
+ * Purpose:
+ * - To make a single, shared instance of the `EventBus` (from `src/app/lib/eventBus.ts`)
+ *   accessible to any component or hook within its Provider tree.
+ * - To facilitate decoupled communication using the publish-subscribe pattern, where different
+ *   parts of the application can emit and listen for events without direct dependencies.
+ *
+ * How to use:
+ * 1. Wrap a high-level component (e.g., in `App.tsx` or the root of a feature area)
+ *    with the `<EventBusProvider>`.
+ * 2. In any child component or hook that needs to interact with the event bus:
+ *    - Call the `useEventBus()` hook to get the shared `EventBus` instance.
+ *    - Use this instance to `emit()` events or subscribe to events using `on()`.
+ *
+ * This context is crucial for integrating the `katoAgentLifecycleMachine` with the rest of the
+ * application, as the machine expects an `EventBus` instance in its input and uses it to
+ * communicate its state changes and processed server messages.
+ */
 import React, { createContext, useContext, ReactNode, useState } from 'react';
 import { EventBus } from '@/app/lib/eventBus'; // Adjust path as needed
 
