@@ -31,6 +31,15 @@
 25. Agent responds to "Hi"
 26. User sends message, "how are you doing?"
 27. Agent responds. 
+28. User clicks the 'write' button. 
+29. The interface switches to a text mode.
+30. Audio input and output is disabled.
+31. The text transcript of the conversation is shown like a chat message. Agent switching controls remain the same.
+32. The user can send a message with a text input.
+33. The agent responds with text.
+34. The user can switch back to the speak interface and resume chatting with audio input and output. 
+35. Whenever an agent is initialized the transcript with that agent will be streamed in with conversation.item.create calls preserving the order with previous_item_id
+
 
 
 

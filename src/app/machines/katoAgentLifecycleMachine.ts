@@ -128,20 +128,6 @@ export const agentLifecycleMachine = setup({
         currentAgentConfig: agent || null
       };
     }),
-    markIntroPlayedAction: assign(({
-      context,
-      event
-    }) => {
-      const specificEvent = event as SpecificEvent<'INTRO_PLAYBACK_COMPLETED'>;
-      if (specificEvent.type === 'INTRO_PLAYBACK_COMPLETED' && specificEvent.success && specificEvent.agentName) {
-        const newSet = new Set(context.playedAgentIntros);
-        newSet.add(specificEvent.agentName);
-        return {
-          playedAgentIntros: newSet
-        };
-      }
-      return {};
-    }),
     assignErrorFromEventData: assign(({
       context,
       event
@@ -1014,13 +1000,6 @@ export const agentLifecycleMachine = setup({
       const agentConfig = context.currentAgentConfig;
       if (!agentName || !agentConfig || !agentConfig.introAudio?.text) return false;
       return !context.playedAgentIntros.has(agentName);
-    },
-    isSwitchingAgentGuard: ({ event }) => (event as SpecificEvent<'RTC_DISCONNECTED'>).isSwitchingAgent === true,
-    isManualDisconnectGuard: ({ event }) => (event as SpecificEvent<'RTC_DISCONNECTED'>).manual === true,
-    introPlayedSuccessfullyGuard: ({ event }) => (event as SpecificEvent<'INTRO_PLAYBACK_COMPLETED'>).success,
-    isAgentIntroAlreadyPlayed: ({ context }) => {
-      if (!context.currentAgentConfig || !context.currentAgentConfig.introAudio?.text) return true;
-      return context.playedAgentIntros.has(context.currentAgentConfig.name);
     },
     isUnexpectedRtcDisconnect: ({ event }) => {
       const rtcEvent = event as SpecificEvent<'RTC_DISCONNECTED'>;
