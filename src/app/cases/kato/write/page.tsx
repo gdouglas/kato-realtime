@@ -97,14 +97,88 @@ const WritePage = () => {
     };
   }, [eventBus]);
 
+  // Ensure agent-specific conversation is loaded on initial page render
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (currentAgentConfig?.name) {
+        console.log(`[WritePage] Initial page load - Loading conversation for ${currentAgentConfig.name}`);
+        eventBus.emit(KatoEvents.UPDATE_TRANSCRIPT_WITH_AGENT_CONTEXT, { agentName: currentAgentConfig.name });
+      }
+    }, 500); // Small delay to ensure contexts are populated
+    
+    return () => clearTimeout(timeoutId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only on mount
+
   // Add effect to monitor session status changes
   useEffect(() => {
     console.log(`[WritePage] Session status changed to: ${sessionStatus}`);
   }, [sessionStatus]);
 
+  // Listen for agent changes from the state machine
+  useEffect(() => {
+    const handleAgentChangedPageLogic = (data?: { newAgentName?: string; agentConfig?: AgentConfig }) => { 
+      console.log(`[WritePage] Agent changed via EventBus to: ${data?.newAgentName}`);
+    };
+    const unsubscribe = eventBus.on(KatoEvents.CURRENT_AGENT_CHANGED, handleAgentChangedPageLogic);
+    return () => unsubscribe();
+  }, [eventBus]);
+
+  // Add effect to update transcript items when current agent changes
+  useEffect(() => {
+    if (!currentAgentConfig || !currentAgentConfig.name) return;
+    
+    console.log(`[WritePage] Checking for agent-specific conversation for ${currentAgentConfig.name}`);
+    
+    // Access agent-specific conversation context from the window global
+    if (typeof window !== 'undefined' && window.__AGENT_CONVERSATION_CONTEXTS__) {
+      const agentContexts = window.__AGENT_CONVERSATION_CONTEXTS__;
+      const agentName = currentAgentConfig.name;
+      
+      // Debug: log all available agent contexts
+      console.log(`[WritePage] Available agent contexts: ${Object.keys(agentContexts).join(', ')}`);
+      Object.entries(agentContexts).forEach(([name, messages]) => {
+        console.log(`[WritePage] Agent ${name} has ${messages.length} messages`);
+      });
+      
+      // If we have stored messages for this agent, set them as the current messages
+      if (agentContexts[agentName] && agentContexts[agentName].length > 0) {
+        console.log(`[WritePage] Found ${agentContexts[agentName].length} stored messages for agent ${agentName}, updating transcript`);
+        console.log(`[WritePage] First few messages:`, agentContexts[agentName].slice(0, 3));
+        
+        // Update transcript items with the agent-specific conversation
+        // This needs to happen in the TranscriptContext, so emit an event for it
+        console.log(`[WritePage] Emitting ${KatoEvents.UPDATE_TRANSCRIPT_WITH_AGENT_CONTEXT} event with agentName=${agentName}`);
+        eventBus.emit(KatoEvents.UPDATE_TRANSCRIPT_WITH_AGENT_CONTEXT, { agentName });
+      } else {
+        console.log(`[WritePage] No stored conversation found for agent ${agentName}`);
+      }
+    }
+  }, [currentAgentConfig, selectedAgentName, eventBus]);
+
   const messages = transcriptItems.filter(
-    (item): item is TranscriptItem & { type: 'MESSAGE' } => item.type === 'MESSAGE' && !item.isHidden
+    (item): item is TranscriptItem & { type: 'MESSAGE' } => 
+      item.type === 'MESSAGE' && 
+      !item.isHidden && 
+      // Only show messages for the current agent
+      (currentAgentConfig?.name ? item.agentName === currentAgentConfig.name : true)
   );
+
+  console.log(`[WritePage] Filtered ${transcriptItems.length} transcript items to ${messages.length} message items`);
+  console.log(`[WritePage] Current agent: ${currentAgentConfig?.name}`);
+  
+  // Check if messages are correctly associated with the current agent
+  if (currentAgentConfig?.name) {
+    const messagesForCurrentAgent = messages.filter(m => m.agentName === currentAgentConfig.name);
+    console.log(`[WritePage] Messages for current agent ${currentAgentConfig.name}: ${messagesForCurrentAgent.length}/${messages.length}`);
+    
+    // Debug info about other agent messages that might be showing
+    const otherAgentMessages = messages.filter(m => m.agentName && m.agentName !== currentAgentConfig.name);
+    if (otherAgentMessages.length > 0) {
+      console.log(`[WritePage] WARNING: Found ${otherAgentMessages.length} messages for other agents`, 
+        otherAgentMessages.map(m => `${m.role}:${m.agentName}`).join(', '));
+    }
+  }
 
   const onToggleConnection = () => {
     if (!currentAgentConfig) {
@@ -273,15 +347,6 @@ const WritePage = () => {
     }
   };
 
-  // Listen for agent changes from the state machine
-  useEffect(() => {
-    const handleAgentChangedPageLogic = (data?: { newAgentName?: string; agentConfig?: AgentConfig }) => { 
-      console.log(`[WritePage] Agent changed via EventBus to: ${data?.newAgentName}`);
-    };
-    const unsubscribe = eventBus.on(KatoEvents.CURRENT_AGENT_CHANGED, handleAgentChangedPageLogic);
-    return () => unsubscribe();
-  }, [eventBus]);
-
   if (showIntroScreen) {
     return <KatoIntroScreen onStartWithPatient={handleStartWithPatient} onStartWithPreceptor={handleStartWithPreceptor} />;
   }
@@ -289,6 +354,55 @@ const WritePage = () => {
   const disableAgentSwitchers = isIntroAudioPlaying || isSwitchingInProgress;
   const isConnected = sessionStatus === "CONNECTED";
   const isInputDisabled = !isConnected || isSwitchingInProgress || isIntroAudioPlaying || isFunctionCallInProgress;
+
+  // Debug function for agent conversation contexts
+  const debugAgentContexts = () => {
+    console.log('------DEBUG AGENT CONTEXTS-------');
+    if (typeof window !== 'undefined' && window.__AGENT_CONVERSATION_CONTEXTS__) {
+      const agentContexts = window.__AGENT_CONVERSATION_CONTEXTS__;
+      console.log(`Available agent contexts: ${Object.keys(agentContexts).join(', ')}`);
+      
+      // Fix empty message content in contexts
+      Object.entries(agentContexts).forEach(([name, messages]) => {
+        let fixedMessages = 0;
+        messages.forEach(m => {
+          if (m.title === '[assistant message]' || !m.title || m.title === '') {
+            console.log(`[WritePage] DEBUG: Found empty or placeholder content for message ${m.itemId}`);
+            m.title = `[Message content unavailable - ${m.role}]`;
+            fixedMessages++;
+          }
+        });
+        
+        if (fixedMessages > 0) {
+          console.log(`[WritePage] DEBUG: Fixed ${fixedMessages} messages for agent ${name}`);
+        }
+      });
+      
+      // Display agent contexts
+      Object.entries(agentContexts).forEach(([name, messages]) => {
+        console.log(`Agent ${name} has ${messages.length} messages:`);
+        console.log(messages.map(m => `${m.role}:${m.itemId}:${(m.title || '[EMPTY TITLE]')?.substring(0, 30) || '[EMPTY TITLE]'}`).join('\n'));
+        
+        // Check for empty titles
+        const emptyTitles = messages.filter(m => !m.title || m.title === '').length;
+        if (emptyTitles > 0) {
+          console.warn(`WARNING: ${emptyTitles}/${messages.length} messages for agent ${name} have empty titles!`);
+          
+          // Log the full objects of empty title messages
+          console.log('Messages with empty titles:', messages.filter(m => !m.title || m.title === ''));
+        }
+      });
+
+      // Force update for current agent
+      if (currentAgentConfig?.name) {
+        console.log(`[WritePage] DEBUG: Manually forcing update for agent ${currentAgentConfig.name}`);
+        eventBus.emit(KatoEvents.UPDATE_TRANSCRIPT_WITH_AGENT_CONTEXT, { agentName: currentAgentConfig.name });
+      }
+    } else {
+      console.log('No agent contexts available');
+    }
+    console.log('------END DEBUG------');
+  };
 
   return (
     <div className="p-4 h-full flex flex-col pb-20 relative">
@@ -314,7 +428,7 @@ const WritePage = () => {
             {messages.map((item) => (
               <li key={item.itemId} className={`p-3 rounded-lg ${item.role === 'user' ? 'bg-blue-50 dark:bg-blue-900 text-blue-800 dark:text-blue-200 ml-auto max-w-[80%]' : 'bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 max-w-[80%]'}`}>
                 <div className="flex items-center mb-1">
-                  <span className="font-semibold capitalize text-xs">{item.role}</span>
+                  <span className="font-semibold capitalize text-xs">{item.agentName == "preceptor" ? "Preceptor" : "Patient"}</span>
                   <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">{item.timestamp}</span>
                 </div>
                 <div className="whitespace-pre-wrap">{item.title}</div>
@@ -362,6 +476,15 @@ const WritePage = () => {
         onSelectAgent={selectAgent}
       />
       <CaseInfoModal isOpen={isCaseInfoModalOpen} onClose={() => setIsCaseInfoModalOpen(false)} />
+      
+      {/* Debug Button - remove in production */}
+      <button 
+        onClick={debugAgentContexts} 
+        className="fixed bottom-20 right-4 z-50 px-2 py-1 bg-red-600 text-white text-xs rounded"
+      >
+        Debug Contexts
+      </button>
+      
       <BottomBar 
         sessionStatus={sessionStatus as SessionStatus}
         currentAgentConfig={currentAgentConfig as AgentConfig | null | undefined}

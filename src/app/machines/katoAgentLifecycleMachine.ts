@@ -357,10 +357,21 @@ export const agentLifecycleMachine = setup({
             else if (role === 'user' && !textContent) textContent = "[Processing...]";
           } else if (role === 'user') {
             textContent = "[Processing user input...]";
+          } else if (role === 'assistant') {
+            // For assistant messages with no content, use a role-specific placeholder
+            // This will be updated when the final content arrives
+            textContent = "[Assistant is responding...]";
+          }
+          
+          // Ensure textContent is not undefined
+          if (textContent === undefined || textContent === null) {
+            console.warn(`[XState] Warning: Empty text content for ${role} message with id ${itemId}`);
+            textContent = role === 'assistant' ? `[Assistant is responding...]` : `[${role} message]`;
           }
           
           if (itemId && role) {
             console.log(`[XState] Conversation item created: ${role} message with agent ${agentName || 'unknown'}`);
+            console.log(`[XState] Message text content: "${textContent?.substring(0, 50)}${textContent && textContent.length > 50 ? '...' : ''}"`);
             
             eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM_CREATED, { 
               itemId, 
@@ -725,6 +736,13 @@ export const agentLifecycleMachine = setup({
             let msgCount = 0;
             for (const item of agentMessages) {
               msgCount++;
+              
+              // Ensure item has a title for display
+              if (!item.title || item.title === '') {
+                console.warn(`[XState Actions] Message ${msgCount} has empty title. Using placeholder for display.`);
+                item.title = `[Message content unavailable]`;
+              }
+              
               const messageContent = item.role === 'user' ? 
                 { type: "input_text", text: item.title || "" } :
                 { type: "text", text: item.title || "" };

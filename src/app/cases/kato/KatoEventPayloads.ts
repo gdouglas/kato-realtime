@@ -252,3 +252,8 @@ export interface SettingsUpdatedPayload {
   audioOut?: boolean;
   ptt?: boolean;
 } 
+
+// Payload for updating transcript with agent-specific conversation context
+export interface UpdateTranscriptWithAgentContextPayload {
+  agentName: string;
+} 

@@ -224,6 +224,77 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
     return () => unsubscribe();
   }, [eventBus, agentConversationContexts]);
 
+  // Listen for requests to update transcript with agent-specific context
+  useEffect(() => {
+    const handleUpdateTranscriptWithAgentContext = (data: { agentName: string }) => {
+      const { agentName } = data;
+      
+      if (!agentName) {
+        console.warn('[TranscriptContext] Update transcript with agent context called with no agent name');
+        return;
+      }
+      
+      console.log(`[TranscriptContext] Updating transcript with agent context for ${agentName}`);
+      console.log(`[TranscriptContext] Current agentConversationContexts keys: ${Object.keys(agentConversationContexts).join(', ')}`);
+      
+      // Get the agent context
+      const agentContext = agentConversationContexts[agentName] || [];
+      
+      if (agentContext.length === 0) {
+        console.log(`[TranscriptContext] No context found for agent ${agentName}`);
+        return;
+      }
+      
+      // Make sure we're only getting messages for this specific agent
+      const filteredAgentContext = agentContext.filter(item => item.agentName === agentName);
+      
+      console.log(`[TranscriptContext] Found ${agentContext.length} messages for agent ${agentName}`);
+      console.log(`[TranscriptContext] After filtering, using ${filteredAgentContext.length} messages`);
+      
+      // Check for empty titles in the agent context
+      const emptyTitles = filteredAgentContext.filter(item => !item.title || item.title === '').length;
+      if (emptyTitles > 0) {
+        console.warn(`[TranscriptContext] WARNING: ${emptyTitles}/${filteredAgentContext.length} messages for agent ${agentName} have empty titles!`);
+        
+        // Log one example of an empty title message
+        const emptyExample = filteredAgentContext.find(item => !item.title || item.title === '');
+        console.warn(`[TranscriptContext] Example of empty title message:`, emptyExample);
+        
+        // Fix empty titles - give them a placeholder value
+        filteredAgentContext.forEach(item => {
+          if (!item.title || item.title === '') {
+            console.log(`[TranscriptContext] Fixing empty title for message ${item.itemId} (${item.role})`);
+            item.title = `[Message content unavailable]`;
+          }
+        });
+      }
+      
+      console.log(`[TranscriptContext] Sample message:`, filteredAgentContext[0] || agentContext[0]);
+      
+      // Update transcript items with breadcrumbs preserved
+      setTranscriptItems(prevItems => {
+        // Filter out message items and keep only breadcrumbs
+        const breadcrumbs = prevItems.filter(item => item.type === 'BREADCRUMB');
+        console.log(`[TranscriptContext] Preserved ${breadcrumbs.length} breadcrumbs`);
+        
+        // Combine breadcrumbs with agent-specific message items
+        const newItems = [...breadcrumbs, ...filteredAgentContext];
+        
+        // Sort by creation time
+        newItems.sort((a, b) => a.createdAtMs - b.createdAtMs);
+        
+        console.log(`[TranscriptContext] Updated transcript with ${newItems.length} items (${breadcrumbs.length} breadcrumbs + ${filteredAgentContext.length} messages)`);
+        console.log(`[TranscriptContext] First few new items:`, newItems.slice(0, 3));
+        
+        // This is critical - ensure state is actually updated by creating a new array
+        return [...newItems];
+      });
+    };
+    
+    const unsubscribe = eventBus.on(KatoEvents.UPDATE_TRANSCRIPT_WITH_AGENT_CONTEXT, handleUpdateTranscriptWithAgentContext);
+    return () => unsubscribe();
+  }, [eventBus, agentConversationContexts, setTranscriptItems]);
+
   const USER_PROCESSING_PLACEHOLDER = "[Processing...]"; // Define placeholder
 
   useEffect(() => {
@@ -352,6 +423,14 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
 
     const handleServerAssistantMessageCompleted = (data: ServerAssistantMessageCompletedPayload) => {
       console.log("[TranscriptContext] Event: SERVER_ASSISTANT_MESSAGE_COMPLETED", data);
+      
+      // Check if the message has text content
+      if (!data.fullText || data.fullText === '') {
+        console.warn(`[TranscriptContext] Warning: Received empty full text for assistant message ${data.itemId}`);
+        // Use a placeholder to ensure we show something
+        data.fullText = "[Message content unavailable]";
+      }
+      
       setTranscriptItems((prev) =>
         prev.map((item) =>
           item.itemId === data.itemId && item.type === "MESSAGE" && item.role === "assistant"
@@ -369,7 +448,24 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
           if (item.itemId === data.itemId) {
             const newTitle = data.finalText !== undefined ? data.finalText : item.title;
             console.log(`[TranscriptContext] SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE: Matched itemId ${data.itemId}. Old title: '${item.title}', New title: '${newTitle}', Status: '${data.status}'`);
-            return { ...item, status: data.status as TranscriptItem['status'], title: newTitle };
+            
+            const updatedItem = { 
+              ...item, 
+              status: data.status as TranscriptItem['status'], 
+              title: newTitle 
+            };
+            
+            // CRITICAL: Also update the agent conversation contexts when item status is updated
+            if (item.agentName && updatedItem.type === 'MESSAGE') {
+              updateAgentContext(updatedItem);
+              
+              // Debug logging for content update
+              if (newTitle !== item.title) {
+                console.log(`[TranscriptContext] Updated message content in ${item.agentName}'s context: ${item.itemId}, new title: "${(newTitle || '').substring(0, 30)}${newTitle && newTitle.length > 30 ? '...' : ''}"`);
+              }
+            }
+            
+            return updatedItem;
           }
           return item;
         });

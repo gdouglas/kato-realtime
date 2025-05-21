@@ -543,6 +543,14 @@ export const KatoEvents = {
    */
   OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED: 'OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED' as const,
 
+  /**
+   * A request to update the transcript with agent-specific conversation context.
+   * Emitted by: UI components (e.g., WritePage) when agent changes.
+   * Consumed by: TranscriptContext to update the displayed messages.
+   * Payload: { agentName: string }
+   */
+  UPDATE_TRANSCRIPT_WITH_AGENT_CONTEXT: 'UPDATE_TRANSCRIPT_WITH_AGENT_CONTEXT' as const,
+
   // --- Tool Call Lifecycle Events (for UI and other listeners) ---
 
   /**
