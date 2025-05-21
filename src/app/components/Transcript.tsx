@@ -191,7 +191,15 @@ function Transcript({
             const displayTitle = isBracketedMessage ? title.slice(1, -1) : title;
 
             return (
-              <div key={itemId} className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}>
+              <div 
+                key={itemId} 
+                className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}
+                data-transcript-item
+                data-item-id={itemId}
+                data-role={role}
+                data-content={displayTitle}
+                data-agent-name={item.agentName || currentAgentName}
+              >
                 <div className={`${bubbleBase} ${messageAlignment}`}>
                   <div className={`text-xs mb-1 ${isUser ? "text-blue-200" : "text-gray-500 dark:text-gray-400"} font-mono`}>
                     {role} @ {timestamp}

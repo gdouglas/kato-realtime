@@ -21,21 +21,39 @@ import {
 // interface ServerSessionCreatedPayload { sessionId: string; }
 // ... and so on for other payload types already defined in KatoEventPayloads.ts
 
+// Add global type declaration at the top of the file
+declare global {
+  interface Window {
+    __TRANSCRIPT_ITEMS__?: any[]; // Use any[] to match the definition in katoAgentLifecycleMachine.ts
+    __AGENT_CONVERSATION_CONTEXTS__?: Record<string, TranscriptItem[]>; // Add map to store per-agent contexts
+  }
+}
+
 type TranscriptContextValue = {
   transcriptItems: TranscriptItem[];
-  addTranscriptMessage: (itemId: string, role: "user" | "assistant" | "system", text: string, hidden?: boolean) => void;
+  addTranscriptMessage: (itemId: string, role: "user" | "assistant" | "system", text: string, hidden?: boolean, agentName?: string) => void;
   updateTranscriptMessage: (itemId: string, text: string, isDelta: boolean) => void;
   addTranscriptBreadcrumb: (title: string, data?: Record<string, any>) => void;
   toggleTranscriptItemExpand: (itemId: string) => void;
   updateTranscriptItem: (itemId: string, updatedProperties: Partial<TranscriptItem>) => void;
   clearTranscriptItems: () => void;
+  agentConversationContexts: Record<string, TranscriptItem[]>;
 };
 
 const TranscriptContext = createContext<TranscriptContextValue | undefined>(undefined);
 
 export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
   const [transcriptItems, setTranscriptItems] = useState<TranscriptItem[]>([]);
+  const [agentConversationContexts, setAgentConversationContexts] = useState<Record<string, TranscriptItem[]>>({});
   const eventBus = useEventBus();
+
+  // Make transcript items available globally for agent switching
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.__TRANSCRIPT_ITEMS__ = transcriptItems;
+      window.__AGENT_CONVERSATION_CONTEXTS__ = agentConversationContexts;
+    }
+  }, [transcriptItems, agentConversationContexts]);
 
   function newTimestampPretty(): string {
     return new Date().toLocaleTimeString([], {
@@ -47,17 +65,47 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
   }
 
   const clearTranscriptItems = useCallback(() => {
+    console.log("[TranscriptContext] Clearing all transcript items");
     setTranscriptItems([]);
   }, [setTranscriptItems]);
 
+  // Update the agent conversation context when a transcript item is added/updated
+  const updateAgentContext = useCallback((item: TranscriptItem) => {
+    if (!item.agentName || item.type !== 'MESSAGE') return;
+    
+    setAgentConversationContexts(prev => {
+      const agentName = item.agentName as string;
+      const existingContext = prev[agentName] || [];
+      
+      // Check if the item already exists in this agent's context
+      const itemExists = existingContext.some(i => i.itemId === item.itemId);
+      
+      if (itemExists) {
+        // Update the existing item
+        const updatedContext = existingContext.map(i => 
+          i.itemId === item.itemId ? item : i
+        );
+        console.log(`[TranscriptContext] Updated item in ${agentName}'s context: ${item.itemId} (${item.role})`);
+        return { ...prev, [agentName]: updatedContext };
+      } else {
+        // Add the new item
+        const updatedContext = [...existingContext, item];
+        console.log(`[TranscriptContext] Added item to ${agentName}'s context: ${item.itemId} (${item.role})`);
+        return { ...prev, [agentName]: updatedContext };
+      }
+    });
+  }, []);
+
   // Still expose addTranscriptMessage for user-initiated messages or direct local additions
-  const addTranscriptMessage: TranscriptContextValue["addTranscriptMessage"] = useCallback((itemId, role, text = "", isHidden = false) => {
+  const addTranscriptMessage: TranscriptContextValue["addTranscriptMessage"] = useCallback((itemId, role, text = "", isHidden = false, agentName) => {
+    console.log(`[TranscriptContext] Adding transcript message: ${itemId}, role: ${role}, agent: ${agentName || 'unknown'}`);
+    
     setTranscriptItems((prev) => {
       if (prev.some((log) => log.itemId === itemId && log.type === "MESSAGE")) {
         // If called directly and item exists, perhaps update it instead of warning, or ensure callers handle this.
         // For now, matches original behavior.
         console.warn(`[TranscriptContext] addTranscriptMessage called for existing itemId=${itemId}.`);
-        return prev.map(item => item.itemId === itemId ? { ...item, title: text, role, isHidden, status: "DONE" } : item);
+        return prev.map(item => item.itemId === itemId ? { ...item, title: text, role, isHidden, status: "DONE", agentName } : item);
       }
       const newItem: TranscriptItem = {
         itemId,
@@ -69,29 +117,49 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
         createdAtMs: Date.now(),
         status: role === 'user' ? "DONE" : "IN_PROGRESS", // User messages are done, assistant might be in progress
         isHidden,
+        agentName,
       };
+      
+      // Also update the agent-specific context
+      if (agentName) {
+        updateAgentContext(newItem);
+      }
+      
       return [...prev, newItem];
     });
-  }, [setTranscriptItems]);
+  }, [setTranscriptItems, updateAgentContext]);
 
   // updateTranscriptMessage: Primarily for local/direct updates if needed. Deltas/completions handled by events.
   const updateTranscriptMessage: TranscriptContextValue["updateTranscriptMessage"] = useCallback((itemId, newText, append = false) => {
-    setTranscriptItems((prev) =>
-      prev.map((item) => {
+    console.log(`[TranscriptContext] Updating transcript message: ${itemId}, append: ${append}`);
+    
+    setTranscriptItems((prev) => {
+      const updatedItems = prev.map((item) => {
         if (item.itemId === itemId && item.type === "MESSAGE") {
-          return {
+          const updatedItem = {
             ...item,
             title: append ? (item.title ?? "") + newText : newText,
             // Optionally update status here if this call implies completion
             // status: "DONE" 
           };
+          
+          // Also update the agent-specific context
+          if (item.agentName) {
+            updateAgentContext(updatedItem);
+          }
+          
+          return updatedItem;
         }
         return item;
-      })
-    );
-  }, [setTranscriptItems]);
+      });
+      
+      return updatedItems;
+    });
+  }, [setTranscriptItems, updateAgentContext]);
 
   const addTranscriptBreadcrumb: TranscriptContextValue["addTranscriptBreadcrumb"] = useCallback((title, data) => {
+    console.log(`[TranscriptContext] Adding breadcrumb: ${title}`);
+    
     setTranscriptItems((prev) => [
       ...prev,
       {
@@ -117,12 +185,44 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
   }, [setTranscriptItems]);
 
   const updateTranscriptItem: TranscriptContextValue["updateTranscriptItem"] = useCallback((itemId, updatedProperties) => {
-    setTranscriptItems((prev) =>
-      prev.map((item) =>
-        item.itemId === itemId ? { ...item, ...updatedProperties } : item
-      )
-    );
-  }, [setTranscriptItems]);
+    console.log(`[TranscriptContext] Updating transcript item: ${itemId}`, updatedProperties);
+    
+    setTranscriptItems((prev) => {
+      const item = prev.find(i => i.itemId === itemId);
+      const updatedItems = prev.map((item) => {
+        if (item.itemId === itemId) {
+          const updatedItem = { ...item, ...updatedProperties };
+          
+          // Also update the agent-specific context
+          if (item.agentName && updatedItem.type === 'MESSAGE') {
+            updateAgentContext(updatedItem);
+          }
+          
+          return updatedItem;
+        }
+        return item;
+      });
+      
+      return updatedItems;
+    });
+  }, [setTranscriptItems, updateAgentContext]);
+
+  // Listen for agent change events to log context switching
+  useEffect(() => {
+    const handleAgentChanged = (data: { newAgentName?: string; oldAgentName?: string }) => {
+      if (data.newAgentName && data.oldAgentName && data.newAgentName !== data.oldAgentName) {
+        console.log(`[TranscriptContext] Agent changed from ${data.oldAgentName} to ${data.newAgentName}`);
+        
+        // Log the context sizes for debugging
+        const oldAgentContextSize = agentConversationContexts[data.oldAgentName]?.length || 0;
+        const newAgentContextSize = agentConversationContexts[data.newAgentName]?.length || 0;
+        console.log(`[TranscriptContext] Context sizes - Previous agent: ${oldAgentContextSize}, New agent: ${newAgentContextSize}`);
+      }
+    };
+    
+    const unsubscribe = eventBus.on(KatoEvents.CURRENT_AGENT_CHANGED, handleAgentChanged);
+    return () => unsubscribe();
+  }, [eventBus, agentConversationContexts]);
 
   const USER_PROCESSING_PLACEHOLDER = "[Processing...]"; // Define placeholder
 
@@ -137,14 +237,34 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
     const handleServerTranscriptItemCreated = (data: ServerTranscriptItemCreatedPayload) => {
       console.log("[TranscriptContext] Event: SERVER_TRANSCRIPT_ITEM_CREATED", data);
       setTranscriptItems((prev) => {
+        // First check if item already exists, update it if so
         if (prev.some((item) => item.itemId === data.itemId)) {
           // If item exists, update it. This might happen if creation and update events are close.
-          return prev.map((item) =>
-            item.itemId === data.itemId
-              ? { ...item, role: data.role, title: data.text, status: data.role === 'user' ? "DONE" : "IN_PROGRESS", isHidden: !!data.isHidden }
-              : item
-          );
+          const updatedItems = prev.map((item) => {
+            if (item.itemId === data.itemId) {
+              const updatedItem: TranscriptItem = { 
+                ...item, 
+                role: data.role, 
+                title: data.text, 
+                status: data.role === 'user' ? "DONE" : "IN_PROGRESS" as const, 
+                isHidden: !!data.isHidden,
+                agentName: data.agentName // Always use the received agent name
+              };
+              
+              // Also update the agent-specific context
+              if (data.agentName) {
+                updateAgentContext(updatedItem);
+              }
+              
+              return updatedItem;
+            }
+            return item;
+          });
+          
+          return updatedItems;
         }
+
+        // Create the new item
         const newItem: TranscriptItem = {
           itemId: data.itemId,
           type: "MESSAGE",
@@ -153,10 +273,37 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
           expanded: false,
           timestamp: newTimestampPretty(),
           createdAtMs: Date.now(),
-          status: data.role === 'user' ? "DONE" : "IN_PROGRESS", // Initial status
+          status: data.role === 'user' ? "DONE" : "IN_PROGRESS", 
           isHidden: !!data.isHidden,
+          agentName: data.agentName
         };
-        return [...prev, newItem];
+        
+        // Also update the agent-specific context
+        if (data.agentName) {
+          updateAgentContext(newItem);
+        }
+
+        // If there's no previousItemId, just append the item
+        if (!data.previousItemId) {
+          console.log(`[TranscriptContext] Adding new message (${data.role}) with no previousItemId, agent: ${data.agentName || 'unknown'}`);
+          return [...prev, newItem];
+        }
+
+        // Handle insertion based on previousItemId
+        const previousItemIndex = prev.findIndex(item => item.itemId === data.previousItemId);
+        
+        // If previous item not found, just append (shouldn't happen but graceful fallback)
+        if (previousItemIndex === -1) {
+          console.warn(`[TranscriptContext] Previous item ${data.previousItemId} not found for item ${data.itemId}`);
+          return [...prev, newItem];
+        }
+
+        // Insert the new item after the previous item
+        console.log(`[TranscriptContext] Inserting message after item ${data.previousItemId}, agent: ${data.agentName || 'unknown'}`);
+        const newItems = [...prev];
+        newItems.splice(previousItemIndex + 1, 0, newItem);
+        
+        return newItems;
       });
     };
 
@@ -248,7 +395,7 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
       eventBus.off(KatoEvents.SERVER_ASSISTANT_MESSAGE_COMPLETED, handleServerAssistantMessageCompleted);
       eventBus.off(KatoEvents.SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE, handleServerTranscriptItemStatusUpdate);
     };
-  }, [eventBus, clearTranscriptItems, addTranscriptBreadcrumb, setTranscriptItems]); // Added setTranscriptItems to deps for safety, though handlers use prev state
+  }, [eventBus, clearTranscriptItems, addTranscriptBreadcrumb, setTranscriptItems, updateAgentContext]); 
 
   const contextValue = React.useMemo(() => ({
     transcriptItems,
@@ -258,6 +405,7 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
     toggleTranscriptItemExpand,
     updateTranscriptItem,
     clearTranscriptItems,
+    agentConversationContexts, // Expose agent conversation contexts
   }), [
     transcriptItems,
     addTranscriptMessage,
@@ -266,6 +414,7 @@ export const TranscriptProvider: FC<PropsWithChildren> = ({ children }) => {
     toggleTranscriptItemExpand,
     updateTranscriptItem,
     clearTranscriptItems,
+    agentConversationContexts,
   ]);
 
   return (

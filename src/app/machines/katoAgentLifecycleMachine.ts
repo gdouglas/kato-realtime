@@ -19,6 +19,14 @@
  * - It centralizes the complex state logic associated with agent interaction and realtime communication,
  *   promoting a clear separation of concerns and a predictable state management model.
  */
+
+// Declare global interface for transcript items
+declare global {
+  interface Window {
+    __TRANSCRIPT_ITEMS__?: any[];
+  }
+}
+
 import { setup, createMachine, assign, fromPromise, sendTo, ActorRef } from 'xstate';
 import { AgentConfig } from '@/app/types';
 import { EventBus } from '@/app/lib/eventBus'; // Assuming path
@@ -248,11 +256,11 @@ export const agentLifecycleMachine = setup({
           }
         };
         dc.onclose = () => {
-          console.log("[XState] Data channel closed");
+          console.log("[XState DEBUG] fetchTokenAndConnectRTC: Data channel closed unexpectedly during setup phase.");
           self.send({ type: 'RTC_DISCONNECTED', reason: 'dc_closed' });
         };
         dc.onerror = (event: Event) => {
-          console.error("[XState] Data channel error:", event);
+          console.error("[XState DEBUG] fetchTokenAndConnectRTC: Data channel error during setup.", event);
           self.send({ type: 'RTC_CONNECTION_FAILED', error: (event as any)?.message || 'Unknown DC error' });
         };
       } else {
@@ -281,9 +289,9 @@ export const agentLifecycleMachine = setup({
         return;
       }
 
-      // Log the raw server message before processing (except for audio_transcript.delta which is noisy)
+      // Log the raw server message before processing (except for audio_transcript.delta, response.text.delta which is noisy)
       logServerEvent(serverMessage, `machine_processing_${serverMessage.type}`);
-      if (serverMessage.type === 'response.audio_transcript.delta') {
+      if (serverMessage.type !== 'response.audio_transcript.delta' && serverMessage.type !== 'response.text.delta') {
         console.log(`[XState] processAndRelayServerMessage: Processing type '${serverMessage.type}'`, serverMessage);
       }
 
@@ -335,6 +343,12 @@ export const agentLifecycleMachine = setup({
           const role = serverMessage.item?.role as 'user' | 'assistant' | 'system' | 'function_call' | 'function_call_output';
           let textContent: string | undefined;
           const firstContent = serverMessage.item?.content?.[0];
+          const previousItemId = serverMessage.item?.previous_item_id;
+          
+          // For user messages coming from the server, use the current agent name
+          // For assistant messages, always use the current agent name
+          // This ensures both sides of conversation are assigned to correct agent
+          const agentName = context.currentAgentConfig?.name;
 
           if (firstContent) {
             if (firstContent.type === 'text') textContent = firstContent.text;
@@ -346,7 +360,15 @@ export const agentLifecycleMachine = setup({
           }
           
           if (itemId && role) {
-            eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM_CREATED, { itemId, role, text: textContent || "" });
+            console.log(`[XState] Conversation item created: ${role} message with agent ${agentName || 'unknown'}`);
+            
+            eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM_CREATED, { 
+              itemId, 
+              role, 
+              text: textContent || "",
+              previousItemId, // Pass previous_item_id for ordering
+              agentName // Always associate with current agent for proper grouping
+            });
           } else {
             console.warn('[XState] Malformed conversation.item.created:', serverMessage);
           }
@@ -524,6 +546,12 @@ export const agentLifecycleMachine = setup({
           addTranscriptBreadcrumb('Server provided rate limit update.');
           // Useful for monitoring. Could potentially parse serverMessage.rate_limits for specific limits.
           break;
+        case 'response.text.delta':
+          // show streaming text as it comes in
+          break;
+        case 'response.text.done':
+          // text response is complete
+          break;
 
         default:
           console.warn(`[XState] processAndRelayServerMessage: Unhandled server message type: ${serverMessage.type}`, serverMessage);
@@ -637,6 +665,7 @@ export const agentLifecycleMachine = setup({
           };
         }
 
+        // Step 1: Send the session.update to configure the agent with new settings
         const sessionUpdatePayload = {
           type: "session.update",
           session: {
@@ -652,6 +681,84 @@ export const agentLifecycleMachine = setup({
           dc.send(JSON.stringify(sessionUpdatePayload));
           logClientEvent(sessionUpdatePayload, "session_update_on_activation");
           console.log("[XState Actions] Sent session.update on agent activation:", sessionUpdatePayload);
+
+          // Step 2: After session update, send the conversation history if switching agents
+          if (context.previousAgentName && context.previousAgentName !== currentAgentConfig.name) {
+            console.log(`[XState Actions] Agent switch detected: ${context.previousAgentName} -> ${currentAgentConfig.name}`);
+            
+            // First, check for agent-specific conversation context
+            let agentMessages: any[] = [];
+            
+            if (typeof window !== 'undefined' && window.__AGENT_CONVERSATION_CONTEXTS__) {
+              const agentContexts = window.__AGENT_CONVERSATION_CONTEXTS__;
+              const agentName = currentAgentConfig.name;
+              
+              if (agentContexts[agentName] && agentContexts[agentName].length > 0) {
+                console.log(`[XState Actions] Found agent-specific context for ${agentName} with ${agentContexts[agentName].length} messages`);
+                agentMessages = agentContexts[agentName];
+              } else {
+                console.log(`[XState Actions] No agent-specific context found for ${agentName}, using filtered transcript items`);
+                
+                // Fallback to the global transcript items
+                if (window.__TRANSCRIPT_ITEMS__) {
+                  const transcriptItems = window.__TRANSCRIPT_ITEMS__;
+                  
+                  // Filter messages to only include ones for this agent
+                  agentMessages = transcriptItems.filter((item: any) => {
+                    return (
+                      item.type === 'MESSAGE' && 
+                      !item.isHidden &&
+                      ((item.role === 'assistant' && item.agentName === currentAgentConfig.name) ||
+                       (item.role === 'user' && item.agentName === currentAgentConfig.name))
+                    );
+                  });
+                  
+                  console.log(`[XState Actions] Filtered ${transcriptItems.length} transcript items to ${agentMessages.length} messages for agent ${currentAgentConfig.name}`);
+                }
+              }
+            }
+            
+            // Log the agent messages we're about to send
+            console.log(`[XState Actions] Preparing to send ${agentMessages.length} messages for agent ${currentAgentConfig.name}`);
+            
+            // Send messages in chronological order
+            let msgCount = 0;
+            for (const item of agentMessages) {
+              msgCount++;
+              const messageContent = item.role === 'user' ? 
+                { type: "input_text", text: item.title || "" } :
+                { type: "text", text: item.title || "" };
+              
+              const conversationItem = {
+                type: "conversation.item.create",
+                item: {
+                  type: "message",
+                  role: item.role,
+                  content: [messageContent]
+                }
+              };
+              
+              try {
+                // Send each message to rebuild conversation history
+                dc.send(JSON.stringify(conversationItem));
+                console.log(`[XState Actions] Sent message ${msgCount}/${agentMessages.length} (${item.role}) to rebuild context for ${currentAgentConfig.name}`);
+              } catch (e) {
+                console.error(`[XState Actions] Error sending conversation item ${msgCount}:`, e);
+              }
+            }
+            
+            if (msgCount > 0) {
+              console.log(`[XState Actions] Successfully sent ${msgCount} messages to rebuild conversation context for ${currentAgentConfig.name}`);
+            } else {
+              console.log(`[XState Actions] No messages sent for ${currentAgentConfig.name} (empty context)`);
+            }
+          } else {
+            if (context.previousAgentName === currentAgentConfig.name) {
+              console.log(`[XState Actions] No agent switch detected (still ${currentAgentConfig.name}), skipping context transfer`);
+            } else {
+              console.log(`[XState Actions] Initial agent activation for ${currentAgentConfig.name}, no previous context to transfer`);
+            }
+          }
 
           // Also clear any pending output audio buffer from a previous agent/interaction
           eventBus.emit(KatoEvents.OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED);
@@ -929,7 +1036,7 @@ export const agentLifecycleMachine = setup({
             console.error(`[XState Actor DEBUG] playAgentIntro: localAudioElement.onerror triggered for ${agentName}. Error: ${errorMessage}`, e);
             logClientEvent({ agentName, error: errorMessage }, "play_intro_actor_audio_element_error");
             // No URL.revokeObjectURL here, let resolveOnce handle it
-            resolveOnce({ agentName, success: false, error: `Audio element error: ${errorMessage}`, revokedAlready: audioBlobUrl ? false : true });
+            resolveOnce({ agentName, success: false, error: errorMessage, revokedAlready: audioBlobUrl ? false : true });
           };
 
           localAudioElement.oncanplaythrough = () => {

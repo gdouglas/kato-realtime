@@ -132,8 +132,10 @@ export interface ServerTranscriptItemCreatedPayload {
   itemId: string;
   role: 'user' | 'assistant'; // From task description, adjust if KatoEvents.ts is more accurate
   text: string; // Changed back from initialText
-  timestamp: number; // Added based on task description example
+  timestamp?: number; // Added based on task description example
   isHidden?: boolean; // Added to align with context usage
+  previousItemId?: string; // Add previous_item_id for ordering
+  agentName?: string; // Add agentName to associate with specific agent
 }
 
 export interface ServerUserTranscriptCompletedPayload {

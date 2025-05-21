@@ -37,7 +37,7 @@ const AgentSwitcher: React.FC<AgentSwitcherProps> = ({
   };
 
   return (
-    <div className="agent-switcher-container bg-gray-100 dark:bg-neutral-800 absolute bottom-0 left-6 flex flex-col space-y-2">
+    <div className="agent-switcher-container bg-gray-100 dark:bg-neutral-800 absolute bottom-0 left-6 flex flex-col space-y-2 z-10">
       {currentAgentConfig?.name !== patientAgent?.name && patientAgent && (
         <div
           onClick={() => handleAgentSelect(patientAgent.name)}

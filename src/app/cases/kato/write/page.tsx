@@ -241,7 +241,8 @@ const WritePage = () => {
         idToAssign: messageId,
         role: 'user',
         title: localMessageText,
-        isLocal: true
+        isLocal: true,
+        agentName: currentAgentConfig?.name
       });
       
       eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM, {
@@ -249,6 +250,7 @@ const WritePage = () => {
         role: 'user',
         title: localMessageText,
         isLocal: true,
+        agentName: currentAgentConfig?.name
       });
       
       // Trigger a response from the agent
