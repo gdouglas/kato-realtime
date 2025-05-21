@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranscript } from '@/app/contexts/TranscriptContext';
@@ -12,6 +12,7 @@ import { TranscriptItem, SessionStatus, AgentConfig } from '@/app/types';
 import BottomBar from "@/app/components/BottomBar/BottomBar";
 import CaseInfoModal from "@/app/components/CaseInfoModal";
 import KatoIntroScreen from "@/app/components/KatoIntroScreen";
+import AgentSwitcher from "@/app/components/AgentSwitcher/AgentSwitcher";
 import { KatoEvents } from '@/app/cases/kato/KatoEvents';
 import { v4 as uuidv4 } from "uuid";
 
@@ -26,15 +27,52 @@ const WritePage = () => {
     sessionStatus,
     currentAgentConfig,
   } = agentLifecycle.state.context;
+  
+  // Add data channel reference
+  const dcRef = useRef<RTCDataChannel | null>(null);
+  
+  // Get data channel from XState context
+  const contextDc = agentLifecycle.state.context.dc;
+  
+  // Update dcRef when XState context dc changes
+  useEffect(() => {
+    if (contextDc) {
+      console.log('[WritePage] Data channel from context assigned to reference');
+      dcRef.current = contextDc;
+    } else {
+      dcRef.current = null;
+    }
+  }, [contextDc]);
+  
+  // Add handler for SEND_MESSAGE_TO_SERVER events
+  useEffect(() => {
+    const handleSendMessageToServer = (data: { eventObj: any, eventNameSuffix?: string }) => {
+      if (dcRef.current && dcRef.current.readyState === "open") {
+        const messagePayload = JSON.stringify(data.eventObj);
+        console.log(`[WritePage] Sending message to server: ${data.eventObj?.type}`, data.eventObj);
+        dcRef.current.send(messagePayload);
+      } else {
+        console.error(`[WritePage] Error: Data channel not open. Event: ${data.eventObj?.type}`);
+        addTranscriptBreadcrumb("Error: Data channel not open.");
+      }
+    };
+    const unsubscribe = eventBus.on(KatoEvents.SEND_MESSAGE_TO_SERVER, handleSendMessageToServer);
+    return () => unsubscribe();
+  }, [eventBus, dcRef, addTranscriptBreadcrumb]);
+  
   const { 
     selectedAgentName,
     selectAgent,
     isSwitchingInProgress,
+    patientAgent,
+    preceptorAgent,
   } = useAgentContext();
   const { isIntroAudioPlaying } = useIntroAudio({ addTranscriptBreadcrumb });
 
   const [isCaseInfoModalOpen, setIsCaseInfoModalOpen] = useState<boolean>(false);
   const [showIntroScreen, setShowIntroScreen] = useState<boolean>(!selectedAgentName);
+  const [currentUserInput, setCurrentUserInput] = useState<string>("");
+  const [isFunctionCallInProgress, setIsFunctionCallInProgress] = useState<boolean>(false);
 
   // Similar to speak page, track when an agent is selected/deselected to show/hide intro screen
   useEffect(() => {
@@ -44,6 +82,25 @@ const WritePage = () => {
       setShowIntroScreen(true);
     }
   }, [selectedAgentName]);
+
+  // Listen for tool call events
+  useEffect(() => {
+    const handleToolCallStarted = () => setIsFunctionCallInProgress(true);
+    const handleToolCallCompleted = () => setIsFunctionCallInProgress(false);
+    
+    const subStart = eventBus.on(KatoEvents.TOOL_CALL_STARTED, handleToolCallStarted);
+    const subComplete = eventBus.on(KatoEvents.TOOL_CALL_COMPLETED, handleToolCallCompleted);
+    
+    return () => {
+      subStart();
+      subComplete();
+    };
+  }, [eventBus]);
+
+  // Add effect to monitor session status changes
+  useEffect(() => {
+    console.log(`[WritePage] Session status changed to: ${sessionStatus}`);
+  }, [sessionStatus]);
 
   const messages = transcriptItems.filter(
     (item): item is TranscriptItem & { type: 'MESSAGE' } => item.type === 'MESSAGE' && !item.isHidden
@@ -120,6 +177,100 @@ const WritePage = () => {
     selectAgent("preceptor");
   };
 
+  // Function to send a text message to the agent
+  const sendTextMessage = async (text: string) => {
+    console.log("[WritePage] sendTextMessage called with:", text);
+    console.log("[WritePage] Connection status:", sessionStatus);
+    console.log("[WritePage] Data channel:", dcRef?.current?.readyState);
+    
+    if (!text.trim() || sessionStatus !== "CONNECTED" || isSwitchingInProgress || isIntroAudioPlaying || isFunctionCallInProgress) {
+      console.log("[WritePage] Cannot send message, conditions not met:", {
+        emptyText: !text.trim(),
+        notConnected: sessionStatus !== "CONNECTED", 
+        isSwitchingInProgress, 
+        isIntroAudioPlaying,
+        isFunctionCallInProgress
+      });
+      return;
+    }
+
+    try {
+      const messageId = uuidv4();
+      
+      // Create local message immediately for better UX
+      const localMessageText = text;
+      addTranscriptBreadcrumb(`Sending text message: "${localMessageText}"`);
+      
+      // Clear input field
+      setCurrentUserInput("");
+      
+      // Send the message to the server
+      console.log("[WritePage] Emitting SEND_MESSAGE_TO_SERVER event with:", {
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: localMessageText
+            }
+          ]
+        }
+      });
+      
+      eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
+        eventObj: {
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: localMessageText
+              }
+            ]
+          }
+        },
+        eventNameSuffix: "user_text_message_write_page"
+      });
+      
+      // Create a transcript item with the message
+      console.log("[WritePage] Emitting SERVER_TRANSCRIPT_ITEM event with:", {
+        idToAssign: messageId,
+        role: 'user',
+        title: localMessageText,
+        isLocal: true
+      });
+      
+      eventBus.emit(KatoEvents.SERVER_TRANSCRIPT_ITEM, {
+        idToAssign: messageId,
+        role: 'user',
+        title: localMessageText,
+        isLocal: true,
+      });
+      
+      // Trigger a response from the agent
+      console.log("[WritePage] Sending response.create to generate agent reply");
+      setTimeout(() => {
+        eventBus.emit(KatoEvents.SEND_MESSAGE_TO_SERVER, {
+          eventObj: {
+            type: "response.create",
+            response: {
+              modalities: ["text"]  // Only request text response for write mode
+            }
+          },
+          eventNameSuffix: "trigger_response_write_page"
+        });
+      }, 100);
+      
+    } catch (error) {
+      console.error("Error sending text message:", error);
+      addTranscriptBreadcrumb(`Error sending message: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   // Listen for agent changes from the state machine
   useEffect(() => {
     const handleAgentChangedPageLogic = (data?: { newAgentName?: string; agentConfig?: AgentConfig }) => { 
@@ -133,27 +284,81 @@ const WritePage = () => {
     return <KatoIntroScreen onStartWithPatient={handleStartWithPatient} onStartWithPreceptor={handleStartWithPreceptor} />;
   }
 
+  const disableAgentSwitchers = isIntroAudioPlaying || isSwitchingInProgress;
+  const isConnected = sessionStatus === "CONNECTED";
+  const isInputDisabled = !isConnected || isSwitchingInProgress || isIntroAudioPlaying || isFunctionCallInProgress;
+
   return (
-    <div className="p-4 h-full flex flex-col pb-20">
+    <div className="p-4 h-full flex flex-col pb-20 relative">
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-semibold text-gray-800 dark:text-gray-200">
           Chat with {currentAgentConfig?.displayName || "Agent"}
         </h1>
-      </div>
-      {messages.length === 0 ? (
-        <div className="flex-grow flex items-center justify-center text-gray-500">
-          No messages yet.
+        <div className="text-sm text-gray-500">
+          {isConnected && <span className="text-green-600">Connected</span>}
+          {sessionStatus === "CONNECTING" && <span className="text-yellow-600">Connecting...</span>}
+          {sessionStatus === "DISCONNECTED" && <span>Disconnected</span>}
+          {sessionStatus === "ERROR" && <span className="text-red-600">Error</span>}
         </div>
-      ) : (
-        <ul className="space-y-2 overflow-y-auto flex-grow">
-          {messages.map((item) => (
-            <li key={item.itemId} className={`p-3 rounded-lg shadow-sm ${item.role === 'user' ? 'bg-blue-50 dark:bg-blue-900 text-blue-800 dark:text-blue-200' : 'bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}>
-              <span className="font-semibold capitalize">{item.role}: </span>
-              <span>{item.title}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      </div>
+      
+      <div className="flex-grow overflow-y-auto mb-4 bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+        {messages.length === 0 ? (
+          <div className="flex-grow flex items-center justify-center text-gray-500">
+            No messages yet. Type a message below to start the conversation.
+          </div>
+        ) : (
+          <ul className="space-y-3">
+            {messages.map((item) => (
+              <li key={item.itemId} className={`p-3 rounded-lg ${item.role === 'user' ? 'bg-blue-50 dark:bg-blue-900 text-blue-800 dark:text-blue-200 ml-auto max-w-[80%]' : 'bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 max-w-[80%]'}`}>
+                <div className="flex items-center mb-1">
+                  <span className="font-semibold capitalize text-xs">{item.role}</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">{item.timestamp}</span>
+                </div>
+                <div className="whitespace-pre-wrap">{item.title}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      
+      {/* Text Input Area */}
+      <div className="mb-4">
+        <div className="flex">
+          <input
+            type="text"
+            value={currentUserInput}
+            onChange={(e) => setCurrentUserInput(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && sendTextMessage(currentUserInput)}
+            placeholder={isInputDisabled ? "Connect to an agent first..." : "Type your message here..."}
+            className="flex-1 p-3 border border-gray-300 rounded-l-md focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60 disabled:bg-gray-100 text-black"
+            disabled={isInputDisabled}
+          />
+          <button
+            onClick={() => sendTextMessage(currentUserInput)}
+            disabled={isInputDisabled || !currentUserInput.trim()}
+            className="px-4 py-2 bg-blue-600 text-white rounded-r-md hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
+          >
+            Send
+          </button>
+        </div>
+        {isFunctionCallInProgress && (
+          <p className="text-xs text-yellow-600 mt-1">Processing function call, please wait...</p>
+        )}
+        {!isConnected && sessionStatus !== "CONNECTING" && (
+          <p className="text-xs text-gray-500 mt-1">Connect to an agent to start chatting</p>
+        )}
+      </div>
+      
+      {/* Agent Switcher component */}
+      <AgentSwitcher
+        currentAgentConfig={currentAgentConfig}
+        patientAgent={patientAgent}
+        preceptorAgent={preceptorAgent}
+        disableAgentSwitchers={disableAgentSwitchers}
+        isIntroAudioPlaying={isIntroAudioPlaying}
+        onSelectAgent={selectAgent}
+      />
       <CaseInfoModal isOpen={isCaseInfoModalOpen} onClose={() => setIsCaseInfoModalOpen(false)} />
       <BottomBar 
         sessionStatus={sessionStatus as SessionStatus}

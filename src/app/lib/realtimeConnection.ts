@@ -37,20 +37,22 @@ export async function createRealtimeConnection(
     }
   };
 
-  // Add explicit audio transceiver for receiving agent audio
-  if (enableAudio) {
-    console.log('[RTCSetup] Adding audio transceiver for receiving');
-    if (typeof pc.addTransceiver === 'function') {
-      try {
-        pc.addTransceiver('audio', { direction: 'recvonly' });
-      } catch (e) {
-        console.error('[RTCSetup] Error adding recvonly audio transceiver:', e);
-      }
-    } else {
-      console.warn('[RTCSetup] pc.addTransceiver is not a function. Cannot add recvonly audio transceiver explicitly.');
+  // Always add explicit audio transceiver for receiving agent audio
+  // This is required for the OpenAI API - the offer must contain an audio media section
+  console.log('[RTCSetup] Adding audio transceiver for receiving (required for API)');
+  if (typeof pc.addTransceiver === 'function') {
+    try {
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+    } catch (e) {
+      console.error('[RTCSetup] Error adding recvonly audio transceiver:', e);
     }
   } else {
-    console.log('[RTCSetup] Skipping audio transceiver setup (enableAudio is false)');
+    console.warn('[RTCSetup] pc.addTransceiver is not a function. Cannot add recvonly audio transceiver explicitly.');
+  }
+  
+  // Log whether audio will be processed based on enableAudio flag
+  if (!enableAudio) {
+    console.log('[RTCSetup] Audio transceiver added but enableAudio is false - audio will be received but not processed');
   }
 
   // Store received tracks/streams if the audio element isn't ready
@@ -153,7 +155,23 @@ export async function createRealtimeConnection(
       }
     }
   } else {
-    console.log('[RTCSetup] Skipping getUserMedia and addTrack for microphone (enableAudio is false)');
+    console.log('[RTCSetup] Creating silent audio track for write mode (required for API)');
+    // Create a silent audio track to make the offer contain an audio section
+    // This is needed for the OpenAI API even if we don't actually use audio
+    try {
+      const ctx = new AudioContext();
+      const oscillator = ctx.createOscillator();
+      const destination = ctx.createMediaStreamDestination();
+      oscillator.connect(destination);
+      oscillator.start();
+      const silentTrack = destination.stream.getAudioTracks()[0];
+      silentTrack.enabled = false; // Make sure it's muted
+      pc.addTrack(silentTrack);
+      console.log('[RTCSetup] Silent audio track added');
+    } catch (err) {
+      console.error('[RTCSetup] Error creating silent audio track:', err);
+      // Continue without the track - we still have the audio transceiver
+    }
   }
 
   // Create data channel for events
