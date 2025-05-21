@@ -118,6 +118,30 @@ export const KatoEvents = {
    */
   USER_CONFIRMED_AUDIO_MODAL: 'USER_CONFIRMED_AUDIO_MODAL' as const,
 
+  /**
+   * User has clicked the button to generate a Differential Diagnosis.
+   * Emitted by: UI components (e.g., BottomBar)
+   * Consumed by: Page logic (e.g., speak/page.tsx or write/page.tsx) to handle navigation/disconnection.
+   * Payload: None
+   */
+  DDX_CREATE_CLICKED: 'DDX_CREATE_CLICKED' as const,
+
+  /**
+   * User has clicked the button to navigate to the 'write' (notes) page.
+   * Emitted by: UI components (e.g., BottomBar)
+   * Consumed by: Page logic (e.g., speak/page.tsx) to handle navigation/disconnection.
+   * Payload: None
+   */
+  NAVIGATE_TO_WRITE_CLICKED: 'NAVIGATE_TO_WRITE_CLICKED' as const,
+
+  /**
+   * User has updated one or more settings (mic, audio output, PTT).
+   * Emitted by: UI components (e.g., Settings controls in BottomBar).
+   * Consumed by: Page logic (e.g., speak/page.tsx) to send to XState machine.
+   * Payload: {@link Payloads.SettingsUpdatedPayload} // Ensure this payload is defined
+   */
+  SETTINGS_UPDATED: 'SETTINGS_UPDATED' as const,
+
   // --- Application/System Events --- (Events originating from within the client application logic)
 
   /**

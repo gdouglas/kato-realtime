@@ -25,6 +25,7 @@ import { setAudioOutputEnabled } from '@/app/lib/realtimeConnection';
 // UI components
 import KatoIntroScreen from "@/app/components/KatoIntroScreen";
 import CaseInfoModal from "@/app/components/CaseInfoModal";
+import AgentSwitcher from "@/app/components/AgentSwitcher/AgentSwitcher";
 
 // Utilities & Case Data
 import { katoCaseDetails } from "@/app/cases/kato/katoCaseData";
@@ -646,28 +647,16 @@ function KatoSpeakPageContent() {
               </div>
             )}
           </div>
-          <div className="absolute bottom-6 left-6 flex flex-col space-y-4">
-            {currentAgentConfig?.name !== patientAgent?.name && patientAgent && (
-              <div 
-                onClick={() => !disableAgentSwitchers && handleAvatarAgentSelect(patientAgent.name)}
-                title={disableAgentSwitchers ? (isIntroAudioPlaying ? "Agent intro playing..." : "Agent switch in progress...") : `Switch to ${patientAgent.publicDescription}`}
-                className={`flex flex-col items-center text-center p-3 rounded-xl transition-all shadow-md hover:shadow-lg ${disableAgentSwitchers ? 'opacity-50 cursor-not-allowed bg-gray-100' : 'cursor-pointer hover:bg-green-100'}`}
-              >
-                <div className="w-20 h-20 border-2 border-green-400 bg-green-50 rounded-full flex items-center justify-center text-green-600 text-xl font-semibold">Patient</div>
-                <span className="mt-1 text-xs font-medium text-gray-600">{patientAgent.name === "mrKato" ? "Mr. Kato" : patientAgent.name}</span>
-              </div>
-            )}
-            {currentAgentConfig?.name !== preceptorAgent?.name && preceptorAgent && (
-               <div 
-                onClick={() => !disableAgentSwitchers && handleAvatarAgentSelect(preceptorAgent.name)}
-                title={disableAgentSwitchers ? (isIntroAudioPlaying ? "Agent intro playing..." : "Agent switch in progress...") : `Switch to ${preceptorAgent.publicDescription}`}
-                className={`flex flex-col items-center text-center p-3 rounded-xl transition-all shadow-md hover:shadow-lg ${disableAgentSwitchers ? 'opacity-50 cursor-not-allowed bg-gray-100' : 'cursor-pointer hover:bg-purple-100'}`}
-               >
-                <div className="w-20 h-20 border-2 border-purple-400 bg-purple-50 rounded-full flex items-center justify-center text-purple-600 text-xl font-semibold"><span className="text-xs">Preceptor</span></div>
-                <span className="mt-1 text-xs font-medium text-gray-600">&nbsp;</span>
-              </div>
-            )}
-          </div>
+          
+          {/* Use the new AgentSwitcher component */}
+          <AgentSwitcher 
+            currentAgentConfig={currentAgentConfig}
+            patientAgent={patientAgent}
+            preceptorAgent={preceptorAgent}
+            disableAgentSwitchers={disableAgentSwitchers}
+            isIntroAudioPlaying={isIntroAudioPlaying}
+            onSelectAgent={handleAvatarAgentSelect}
+          />
         </div>
       </div>
 

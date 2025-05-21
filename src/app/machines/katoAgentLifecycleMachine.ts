@@ -102,6 +102,9 @@ export type AgentLifecycleMachineEvent =
   | { type: 'TOOL_EXECUTOR_SUCCESS'; callId: string; functionName: string; result: any }
   | { type: 'TOOL_EXECUTOR_FAILURE'; callId: string; functionName: string; error: any }
   | { type: 'USER_UPDATED_SETTINGS'; micEnabled: boolean; audioOutputEnabled: boolean; pushToTalk: boolean }
+  | { type: 'SETTING_MIC_ENABLED'; value: boolean }
+  | { type: 'SETTING_AUDIO_OUTPUT_ENABLED'; value: boolean }
+  | { type: 'SETTING_PUSH_TO_TALK'; value: boolean }
 
 type SpecificEvent<T extends AgentLifecycleMachineEvent['type']> = Extract<AgentLifecycleMachineEvent, { type: T }>;
 
@@ -529,18 +532,8 @@ export const agentLifecycleMachine = setup({
           break;
       }
     },
-    assignAudioElement: assign(({
-      context,
-      event
-    }) => {
-      const specificEvent = event as SpecificEvent<'AUDIO_ELEMENT_READY'>;
-      if (specificEvent.audioElement) {
-        console.log('[XState] Updated audio element in context');
-        return {
-          audioElement: specificEvent.audioElement
-        };
-      }
-      return {};
+    assignAudioElement: assign({
+      audioElement: ({ event }) => (event as SpecificEvent<'AUDIO_ELEMENT_READY'>).audioElement
     }),
     sendSimulatedMessageOnSwitchAction: ({ context }) => {
       if (context.justSkippedIntro && context.currentAgentConfig) {
@@ -720,6 +713,49 @@ export const agentLifecycleMachine = setup({
         // The flag is reset when activatingAgent is re-entered.
       }
     },
+    // Actions to update settings in context
+    assignMicEnabled: assign(({
+      context,
+      event
+    }) => {
+      const newValue = (event as SpecificEvent<'SETTING_MIC_ENABLED'>).value;
+      if (context.micEnabled !== newValue) {
+        if (context.pc) {
+          setMicrophoneEnabled(context.pc, newValue); // Pass context.pc
+        } else {
+          console.warn('[XState] Cannot set microphone enabled: PeerConnection (pc) is not available in context.');
+        }
+        context.eventBus.emit(KatoEvents.AUDIO_INPUT_MODE_CHANGED, { mode: newValue && !context.pushToTalk ? 'conversation' : (newValue && context.pushToTalk ? 'ptt' : 'no_mic')});
+        context.addTranscriptBreadcrumb(`Microphone ${newValue ? 'enabled' : 'disabled'}.`);
+        return { micEnabled: newValue };
+      }
+      return {};
+    }),
+    assignAudioOutputEnabled: assign(({
+      context,
+      event
+    }) => {
+      const newValue = (event as SpecificEvent<'SETTING_AUDIO_OUTPUT_ENABLED'>).value;
+      if (context.audioOutputEnabled !== newValue) {
+        // Side effect handled by speak/page.tsx listening to AUDIO_PLAYBACK_ENABLED_CHANGED
+        context.eventBus.emit(KatoEvents.AUDIO_PLAYBACK_ENABLED_CHANGED, newValue);
+        context.addTranscriptBreadcrumb(`Audio output ${newValue ? 'enabled' : 'disabled'}.`);
+        return { audioOutputEnabled: newValue, isAudioPlaybackEnabled: newValue };
+      }
+      return {};
+    }),
+    assignPushToTalk: assign(({
+      context,
+      event
+    }) => {
+      const newValue = (event as SpecificEvent<'SETTING_PUSH_TO_TALK'>).value;
+      if (context.pushToTalk !== newValue) {
+        context.eventBus.emit(KatoEvents.AUDIO_INPUT_MODE_CHANGED, { mode: context.micEnabled && !newValue ? 'conversation' : (context.micEnabled && newValue ? 'ptt' : 'no_mic')});
+        context.addTranscriptBreadcrumb(`Push-to-talk ${newValue ? 'enabled' : 'disabled'}.`);
+        return { pushToTalk: newValue };
+      }
+      return {};
+    }),
   },
   actors: {
     fetchTokenAndConnectRTC: fromPromise(async ({ input, self }) => {

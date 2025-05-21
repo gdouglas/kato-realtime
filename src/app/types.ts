@@ -52,6 +52,8 @@ export interface AgentConfig {
   tools: Tool[];
   model?: string; // Optional model specification
   voice?: string; // Optional voice setting for text-to-speech
+  avatar?: string; // Optional: path to agent's avatar image
+  role?: string;    // Optional: describes the agent's role, e.g., 'patient', 'preceptor'
   introAudio?: { // Optional introductory audio message configuration
     text: string; // The text to be spoken
     instructions?: string; // Optional instructions for TTS voice affect, tone, pacing etc.

@@ -244,3 +244,9 @@ export interface ToolCallStartedPayload {
 // AGENT_RESPONSE_COMPLETED
 // OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED
 // TOOL_CALL_STARTED 
+
+export interface SettingsUpdatedPayload {
+  mic?: boolean;
+  audioOut?: boolean;
+  ptt?: boolean;
+} 

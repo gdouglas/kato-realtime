@@ -15,6 +15,8 @@ interface AgentContextType {
   currentAgentConfig: AgentConfig | null | undefined; // Can be null or undefined from XState
   patientAgent: AgentConfig | null; // Placeholder - needs logic if used
   preceptorAgent: AgentConfig | null; // Placeholder - needs logic if used
+  availableAgents: AgentConfig[];
+  inactiveAgents: AgentConfig[];
   selectAgent: (agentName: string) => void;
   isSwitchingInProgress: boolean; 
 }
@@ -39,11 +41,16 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   let preceptorAgent: AgentConfig | null = null;
 
   const resolvedAgentConfigs = contextAgentConfigs || []; // Ensure it's an array
+  const availableAgents = resolvedAgentConfigs; // All resolved agents are "available"
 
   if (resolvedAgentConfigs.length > 0) {
     patientAgent = resolvedAgentConfigs.find(agent => agent.name === "mrKato") || null;
     preceptorAgent = resolvedAgentConfigs.find(agent => agent.name === "preceptor") || null;
   }
+
+  const inactiveAgents = availableAgents.filter(
+    agent => agent.name !== currentAgentConfig?.name
+  );
 
   const selectAgent = useCallback((agentName: string) => {
     const currentMachineState = agentLifecycle.state;
@@ -76,6 +83,8 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       currentAgentConfig: currentAgentConfig, 
       patientAgent, 
       preceptorAgent, 
+      availableAgents,
+      inactiveAgents,
       selectAgent,
       isSwitchingInProgress, 
     }}>
