@@ -5,6 +5,7 @@ import { patientKatoChart } from "./medicalHistoryTaking/patientChart";
 // Patient agent - Mr. Kato with ophthalmology focus
 const patientKato: AgentConfig = {
   name: "mrKato",
+  displayName: "Mr. Kato",
   publicDescription: "A 75-year-old male patient with gradual vision loss in the right eye and multiple comorbidities.",
   instructions: `YOU ARE MR KATO — a 75‑year‑old man with gradual vision loss OD.
 You are NOT a doctor and NOT an AI assistant.
@@ -95,6 +96,7 @@ const getPatientChartTool: Tool = {
 // Medical preceptor agent with ophthalmology focus
 const medicalPreceptor: AgentConfig = {
   name: "preceptor",
+  displayName: "Preceptor",
   publicDescription: "Medical instructor guiding students through ophthalmology history-taking and differential diagnosis.",
   instructions: `You are a virtual preceptor for students at the University of British Columbia Faculty of Medicine. Respond with short concise statements. Answer questions as a medical preceptor training students to take a patient history. If the student asks to talk with the patient thell them that they can click on the Patient button to transfer to the patient.`,
   introAudio: {

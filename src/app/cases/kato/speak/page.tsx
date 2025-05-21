@@ -26,6 +26,7 @@ import { setAudioOutputEnabled } from '@/app/lib/realtimeConnection';
 import KatoIntroScreen from "@/app/components/KatoIntroScreen";
 import CaseInfoModal from "@/app/components/CaseInfoModal";
 import AgentSwitcher from "@/app/components/AgentSwitcher/AgentSwitcher";
+import BottomBar from "@/app/components/BottomBar/BottomBar";
 
 // Utilities & Case Data
 import { katoCaseDetails } from "@/app/cases/kato/katoCaseData";
@@ -285,6 +286,12 @@ function KatoSpeakPageContent() {
     }
     router.push('/cases/kato/ddx');
   }, [router, sessionStatus, agentLifecycle, addTranscriptBreadcrumb]);
+
+  const handleNavigateToWrite = useCallback(() => {
+    console.log("[SpeakPage] Navigating to write page");
+    eventBus.emit(KatoEvents.NAVIGATE_TO_WRITE_CLICKED);
+    router.push('/cases/kato/write');
+  }, [router, eventBus]);
 
   useEffect(() => { 
     const calculatePositions = () => {
@@ -660,29 +667,17 @@ function KatoSpeakPageContent() {
         </div>
       </div>
 
-      <div className="p-3 border-t bg-gray-50 flex justify-between items-center space-x-4">
-        <div></div> 
-        <div className="flex items-center space-x-4"> 
-          <button onClick={onToggleConnection}
-            className={`px-8 py-3 rounded-lg text-white font-semibold text-lg shadow-md transition-colors ${sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING" ? "bg-red-500 hover:bg-red-600" : "bg-green-500 hover:bg-green-600"} focus:outline-none focus:ring-2 disabled:opacity-50`}
-            disabled={(!currentAgentConfig && !(sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING")) || isSwitchingInProgress} >
-            {sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING" ? "Disconnect" : "Connect"}
-          </button>
-          <button onClick={() => router.push('/cases/kato/write')}
-            className="px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 disabled:opacity-50"
-            disabled={isSwitchingInProgress || isIntroAudioPlaying}>
-             Write 
-          </button>
-        </div>
-        <div> 
-          <button onClick={handleCreateDDx}
-            className="px-6 py-3 bg-purple-500 hover:bg-purple-600 text-white font-semibold rounded-lg shadow-md focus:outline-none focus:ring-2 disabled:opacity-50"
-            disabled={isSwitchingInProgress || isIntroAudioPlaying}>
-            Create a DDx
-          </button>
-        </div>
-      </div>
       <CaseInfoModal isOpen={isCaseInfoModalOpen} onClose={() => setIsCaseInfoModalOpen(false)} />
+      <BottomBar 
+        sessionStatus={sessionStatus}
+        currentAgentConfig={currentAgentConfig}
+        isSwitchingInProgress={isSwitchingInProgress}
+        isIntroAudioPlaying={isIntroAudioPlaying}
+        onToggleConnection={onToggleConnection}
+        onNavigateToWrite={handleNavigateToWrite}
+        onCreateDDx={handleCreateDDx}
+        isWritePage={false}
+      />
     </div>
   );
 }

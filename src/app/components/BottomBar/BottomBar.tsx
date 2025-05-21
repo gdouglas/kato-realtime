@@ -9,6 +9,7 @@ interface BottomBarProps {
   onToggleConnection: () => void;
   onNavigateToWrite: () => void;
   onCreateDDx: () => void;
+  isWritePage?: boolean; // New prop to determine if we're on the write page
 }
 
 const BottomBar: React.FC<BottomBarProps> = ({
@@ -19,6 +20,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
   onToggleConnection,
   onNavigateToWrite,
   onCreateDDx,
+  isWritePage = false, // Default to false (meaning we're on speak page)
 }) => {
   return (
     <div className="p-3 border-t bg-gray-50 flex justify-between items-center space-x-4 fixed bottom-0 left-0 right-0 shadow-md">
@@ -46,7 +48,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
           className="px-8 py-3 border border-gray-400 rounded-lg text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 disabled:opacity-50"
           disabled={isSwitchingInProgress || isIntroAudioPlaying}
         >
-          Write
+          {isWritePage ? "Speak" : "Write"}
         </button>
       </div>
       <div>

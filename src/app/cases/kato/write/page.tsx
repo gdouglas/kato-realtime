@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranscript } from '@/app/contexts/TranscriptContext';
@@ -11,6 +11,7 @@ import { useEventBus } from '@/app/contexts/EventBusContext';
 import { TranscriptItem, SessionStatus, AgentConfig } from '@/app/types';
 import BottomBar from "@/app/components/BottomBar/BottomBar";
 import CaseInfoModal from "@/app/components/CaseInfoModal";
+import KatoIntroScreen from "@/app/components/KatoIntroScreen";
 import { KatoEvents } from '@/app/cases/kato/KatoEvents';
 import { v4 as uuidv4 } from "uuid";
 
@@ -26,11 +27,23 @@ const WritePage = () => {
     currentAgentConfig,
   } = agentLifecycle.state.context;
   const { 
+    selectedAgentName,
+    selectAgent,
     isSwitchingInProgress,
   } = useAgentContext();
   const { isIntroAudioPlaying } = useIntroAudio({ addTranscriptBreadcrumb });
 
   const [isCaseInfoModalOpen, setIsCaseInfoModalOpen] = useState<boolean>(false);
+  const [showIntroScreen, setShowIntroScreen] = useState<boolean>(!selectedAgentName);
+
+  // Similar to speak page, track when an agent is selected/deselected to show/hide intro screen
+  useEffect(() => {
+    if (selectedAgentName) {
+      setShowIntroScreen(false);
+    } else {
+      setShowIntroScreen(true);
+    }
+  }, [selectedAgentName]);
 
   const messages = transcriptItems.filter(
     (item): item is TranscriptItem & { type: 'MESSAGE' } => item.type === 'MESSAGE' && !item.isHidden
@@ -58,6 +71,12 @@ const WritePage = () => {
         agentLifecycle.send({ type: 'RETRY' });
       }
     }
+  };
+
+  const handleNavigateToSpeak = () => {
+    console.log("[WritePage] Navigating to speak page");
+    eventBus.emit(KatoEvents.NAVIGATE_TO_WRITE_CLICKED); // Using same event for consistency
+    router.push('/cases/kato/speak');
   };
 
   const handleCreateDDx = async () => {
@@ -90,15 +109,36 @@ const WritePage = () => {
     }
   };
 
+  // Handler functions for intro screen buttons
+  const handleStartWithPatient = () => {
+    console.log(`[WritePage] User selected Start With Patient.`);
+    selectAgent("mrKato");
+  };
+
+  const handleStartWithPreceptor = () => {
+    console.log(`[WritePage] User selected Start With Preceptor.`);
+    selectAgent("preceptor");
+  };
+
+  // Listen for agent changes from the state machine
+  useEffect(() => {
+    const handleAgentChangedPageLogic = (data?: { newAgentName?: string; agentConfig?: AgentConfig }) => { 
+      console.log(`[WritePage] Agent changed via EventBus to: ${data?.newAgentName}`);
+    };
+    const unsubscribe = eventBus.on(KatoEvents.CURRENT_AGENT_CHANGED, handleAgentChangedPageLogic);
+    return () => unsubscribe();
+  }, [eventBus]);
+
+  if (showIntroScreen) {
+    return <KatoIntroScreen onStartWithPatient={handleStartWithPatient} onStartWithPreceptor={handleStartWithPreceptor} />;
+  }
+
   return (
     <div className="p-4 h-full flex flex-col pb-20">
       <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-semibold text-gray-800 dark:text-gray-200">Transcribed Messages</h1>
-        <Link href="/cases/kato/speak" passHref>
-          <button className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition ease-in-out duration-150">
-            Go to Speak Page
-          </button>
-        </Link>
+        <h1 className="text-2xl font-semibold text-gray-800 dark:text-gray-200">
+          Chat with {currentAgentConfig?.displayName || "Agent"}
+        </h1>
       </div>
       {messages.length === 0 ? (
         <div className="flex-grow flex items-center justify-center text-gray-500">
@@ -121,8 +161,9 @@ const WritePage = () => {
         isSwitchingInProgress={isSwitchingInProgress}
         isIntroAudioPlaying={isIntroAudioPlaying}
         onToggleConnection={onToggleConnection}
-        onNavigateToWrite={() => router.push('/cases/kato/write')}
+        onNavigateToWrite={handleNavigateToSpeak}
         onCreateDDx={handleCreateDDx}
+        isWritePage={true}
       />
     </div>
   );
