@@ -1639,32 +1639,33 @@ export const agentLifecycleMachine = setup({
     },
     reconnectingForAudioModeChange: {
       entry: [
-        (context) => console.log(`[XState] Reconnecting due to audio mode change: ${context.isAudioPlaybackEnabled ? 'speak' : 'write'} mode`),
+        ({ context }) => console.log(`[XState] Reconnecting due to audio mode change: ${context.isAudioPlaybackEnabled ? 'speak' : 'write'} mode`),
         assign({
-          previousAgentName: (context) => context.currentAgentConfig?.name || undefined
+          previousAgentName: ({ context }) => context.currentAgentConfig?.name || undefined
         })
       ],
       invoke: {
         src: 'disconnectRTC',
+        input: ({ context }) => ({ ...context, isSwitching: false }),
         onDone: {
           target: 'idle',
           actions: [
-            (context) => console.log('[XState] Disconnected for audio mode change, reconnecting via idle state'),
+            ({ context }) => console.log('[XState] Disconnected for audio mode change, reconnecting via idle state'),
             // Instead of trying to send events directly, we'll set this up so the
             // idle state can handle it when we transition there
             assign({
-              selectedAgentName: (context) => context.previousAgentName
+              selectedAgentName: ({ context }) => context.previousAgentName
             })
           ]
         },
         onError: {
           target: 'connectionError',
           actions: [
-            (context, event) => console.error('[XState] Error during reconnection:', event),
+            ({ context, event }) => console.error('[XState] Error during reconnection:', event),
             assign({
-              error: (_, event) => {
+              error: ({ event }) => {
                 // Handle error in a safe way
-                return event?.error || event?.data || 'Unknown error during reconnection';
+                return event.error || 'Unknown error during reconnection';
               },
               sessionStatus: 'ERROR' as const
             })
