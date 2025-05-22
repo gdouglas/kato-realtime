@@ -84,6 +84,11 @@ export interface AgentLifecycleMachineContext {
   audioOutputEnabled?: boolean;
   pushToTalk?: boolean;
   justSkippedIntro?: boolean;
+  lastReconnectionTime: number;
+  isAudioModeChangeInProgress: boolean;
+  
+  // Add the currentReconnectAttempt to fix the linter error
+  currentReconnectAttempt?: number;
 }
 
 export type AgentLifecycleMachineEvent =
@@ -112,10 +117,14 @@ export type AgentLifecycleMachineEvent =
   | { type: 'USER_UPDATED_SETTINGS'; micEnabled: boolean; audioOutputEnabled: boolean; pushToTalk: boolean }
   | { type: 'SETTING_MIC_ENABLED'; value: boolean }
   | { type: 'SETTING_AUDIO_OUTPUT_ENABLED'; value: boolean }
-  | { type: 'SETTING_PUSH_TO_TALK'; value: boolean }
+  | { type: 'SETTING_PUSH_TO_TALK'; value: boolean };
 
 type SpecificEvent<T extends AgentLifecycleMachineEvent['type']> = Extract<AgentLifecycleMachineEvent, { type: T }>;
 
+// Define a new type for events that can be sent within the machine
+type MachineInternalEvent = 
+  | { type: 'NO_OP' } // Add any other internal event types here
+  | AgentLifecycleMachineEvent;
 
 export const agentLifecycleMachine = setup({
   types: {
@@ -881,6 +890,41 @@ export const agentLifecycleMachine = setup({
       }
       return {};
     }),
+    logAudioPlaybackEnabledChanged: ({ event }: { event: any }) => {
+      if (typeof event.value === 'boolean') {
+        console.log(`[XState] Audio playback ${event.value ? 'enabled' : 'disabled'}`);
+      }
+    },
+    logReconnectingForAudioModeChange: ({ context }: { context: AgentLifecycleMachineContext }) => {
+      console.log(`[XState] Reconnecting due to audio mode change: ${context.isAudioPlaybackEnabled ? 'speak' : 'write'} mode`);
+    },
+    logDisconnectedForAudioModeChange: () => {
+      console.log('[XState] Disconnected for audio mode change, preparing to reconnect');
+    },
+    logWaitCompleteForAudioModeChange: () => {
+      console.log('[XState] Wait complete, selecting agent after audio mode change');
+    },
+    logErrorReconnectingAudioMode: ({ event }: { event: any }) => {
+      if (event && event.data) {
+        console.error('[XState] Error reconnecting after audio mode change:', event.data);
+      } else {
+        console.error('[XState] Error reconnecting after audio mode change: Unknown error');
+      }
+    },
+    updateEventBusAudioPlaybackEnabled: ({ context, event }: { context: AgentLifecycleMachineContext; event: any }) => {
+      if (context.eventBus && typeof event.value === 'boolean') {
+        context.eventBus.emit('kato_event_audio_playback_enabled_changed', event.value);
+      }
+    },
+    // Add a new action to handle agent selection
+    sendSelectAgentAction: ({ context, self }) => {
+      if (context.previousAgentName) {
+        self.send({ 
+          type: 'SELECT_AGENT', 
+          agentName: context.previousAgentName 
+        });
+      }
+    },
   },
   actors: {
     fetchTokenAndConnectRTC: fromPromise(async ({ input, self }) => {
@@ -1173,6 +1217,26 @@ export const agentLifecycleMachine = setup({
     isManualRtcDisconnect: ({ event }) => {
       const rtcEvent = event as SpecificEvent<'RTC_DISCONNECTED'>;
       return rtcEvent.type === 'RTC_DISCONNECTED' && rtcEvent.manual === true;
+    },
+    shouldDebounceReconnection: ({ context }: { context: AgentLifecycleMachineContext }) => {
+      const now = Date.now();
+      const timeSinceLastReconnection = now - context.lastReconnectionTime;
+      const DEBOUNCE_TIME = 2000; // 2 seconds
+      
+      console.log(`[XState Guard] shouldDebounceReconnection: timeSince=${timeSinceLastReconnection}ms, threshold=${DEBOUNCE_TIME}ms`);
+      
+      return timeSinceLastReconnection < DEBOUNCE_TIME;
+    },
+    shouldReconnectForAudioModeChange: ({ context, event }: { context: AgentLifecycleMachineContext; event: any }) => {
+      if (typeof event.value !== 'boolean') return false;
+      
+      // Only reconnect if audio mode actually changed and we're connected
+      const audioModeChanged = context.isAudioPlaybackEnabled !== event.value;
+      const isConnected = context.sessionStatus === 'CONNECTED';
+      
+      console.log(`[XState Guard] shouldReconnectForAudioModeChange: audioModeChanged=${audioModeChanged}, isConnected=${isConnected}`);
+      
+      return audioModeChanged && isConnected;
     }
   },
 }).createMachine({
@@ -1196,6 +1260,8 @@ export const agentLifecycleMachine = setup({
     micEnabled: true,
     audioOutputEnabled: true,
     pushToTalk: false, // Default to conversation mode as per requirement
+    lastReconnectionTime: 0,
+    isAudioModeChangeInProgress: false,
   }),
   on: {
     RTC_CONNECTED: {
@@ -1570,6 +1636,53 @@ export const agentLifecycleMachine = setup({
         SELECT_AGENT: { target: 'preparingToSwitch', actions: ['setSelectedAgentName', 'clearError'] },
         _INTERNAL_FAIL_SWITCH: { actions: ['emitAgentSwitchFailed', assign({isSwitchingGlobal: false})]},
       },
+    },
+    reconnectingForAudioModeChange: {
+      entry: [
+        (context) => console.log(`[XState] Reconnecting due to audio mode change: ${context.isAudioPlaybackEnabled ? 'speak' : 'write'} mode`),
+        assign({
+          previousAgentName: (context) => context.currentAgentConfig?.name || undefined
+        })
+      ],
+      invoke: {
+        src: 'disconnectRTC',
+        onDone: {
+          target: 'idle',
+          actions: [
+            (context) => console.log('[XState] Disconnected for audio mode change, reconnecting via idle state'),
+            // Instead of trying to send events directly, we'll set this up so the
+            // idle state can handle it when we transition there
+            assign({
+              selectedAgentName: (context) => context.previousAgentName
+            })
+          ]
+        },
+        onError: {
+          target: 'connectionError',
+          actions: [
+            (context, event) => console.error('[XState] Error during reconnection:', event),
+            assign({
+              error: (_, event) => {
+                // Handle error in a safe way
+                return event?.error || event?.data || 'Unknown error during reconnection';
+              },
+              sessionStatus: 'ERROR' as const
+            })
+          ]
+        }
+      }
+    },
+    errorReconnectingAudioMode: {
+      entry: [
+        'logErrorReconnectingAudioMode',
+        assign({
+          sessionStatus: 'ERROR',
+          isAudioModeChangeInProgress: false
+        })
+      ],
+      on: {
+        RETRY: 'idle'
+      }
     }
   }
 });

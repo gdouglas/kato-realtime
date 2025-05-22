@@ -6,7 +6,7 @@ export async function createRealtimeConnection(
   codec: string,
   enableAudio: boolean
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel }> {
-  console.log('[RTCSetup] Creating realtime connection...');
+  console.log(`[RTCSetup] Creating realtime connection... enableAudio=${enableAudio}`);
   // Configure RTCPeerConnection with explicit STUN servers
   const pc = new RTCPeerConnection({
     iceServers: [
@@ -50,10 +50,8 @@ export async function createRealtimeConnection(
     console.warn('[RTCSetup] pc.addTransceiver is not a function. Cannot add recvonly audio transceiver explicitly.');
   }
   
-  // Log whether audio will be processed based on enableAudio flag
-  if (!enableAudio) {
-    console.log('[RTCSetup] Audio transceiver added but enableAudio is false - audio will be received but not processed');
-  }
+  // Log current audio configuration mode
+  console.log(`[RTCSetup] Audio configuration mode: ${enableAudio ? 'SPEAK mode with audio' : 'WRITE mode - text only'}`);
 
   // Store received tracks/streams if the audio element isn't ready
   let pendingAudioStream: MediaStream | null = null;
@@ -62,7 +60,7 @@ export async function createRealtimeConnection(
     console.log(`[RTCSetup] Track received: ${e.track.kind}`);
     
     if (enableAudio && e.track.kind === 'audio') {
-      console.log('[RTCSetup] Audio track received');
+      console.log('[RTCSetup] Audio track received - will process for playback');
       
       // Track state change events for debugging
       e.track.onended = () => console.log(`[RTCSetup] Audio track ended`);
@@ -101,8 +99,9 @@ export async function createRealtimeConnection(
         }, 10000);
       }
     } else if (e.track.kind === 'audio') { // Audio track received but enableAudio is false
-      console.log('[RTCSetup] Audio track received but enableAudio is false, ignoring.');
-      e.track.stop(); // Stop the track to release resources if possible
+      console.log('[RTCSetup] Audio track received but enableAudio is false (WRITE mode), ignoring for playback');
+      // In write mode, we'll still receive the track but won't attach it to the audio element
+      // Do NOT stop the track as we may need it later if the user switches to speak mode
     } else if (e.track.kind === 'video') {
       console.log('[RTCSetup] Video track received (ignoring)');
     }
@@ -114,7 +113,8 @@ export async function createRealtimeConnection(
       console.log('[RTCSetup] Attaching stream to audio element');
       
       // Ensure the audio element is properly configured
-      element.autoplay = true;
+      element.autoplay = enableAudio; // Only autoplay if audio is enabled
+      element.muted = !enableAudio; // Mute if audio is disabled
       element.controls = true; // For debugging, can remove in production
       
       // Set the stream as the source
@@ -123,9 +123,13 @@ export async function createRealtimeConnection(
       // Listen for audio element events
       element.onloadedmetadata = () => {
         console.log('[RTCSetup] Audio metadata loaded');
-        element.play()
-          .then(() => console.log('[RTCSetup] Audio playback started'))
-          .catch(err => console.error('[RTCSetup] Error starting audio playback:', err));
+        if (enableAudio) {
+          element.play()
+            .then(() => console.log('[RTCSetup] Audio playback started'))
+            .catch(err => console.error('[RTCSetup] Error starting audio playback:', err));
+        } else {
+          console.log('[RTCSetup] Audio playback disabled (WRITE mode)');
+        }
       };
       
       element.onerror = (err) => {
@@ -138,10 +142,11 @@ export async function createRealtimeConnection(
 
   if (enableAudio) {
     try {
+      console.log('[RTCSetup] Attempting to access microphone for SPEAK mode');
       const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
       // Add microphone track, which creates a transceiver
       pc.addTrack(ms.getTracks()[0]);
-      console.log('[RTCSetup] Microphone track added');
+      console.log('[RTCSetup] Microphone track added successfully for SPEAK mode');
     } catch (err: any) {
       console.error('[RTCSetup] getUserMedia failed:', err);
       if (err.name === "NotFoundError") {
@@ -155,7 +160,7 @@ export async function createRealtimeConnection(
       }
     }
   } else {
-    console.log('[RTCSetup] Creating silent audio track for write mode (required for API)');
+    console.log('[RTCSetup] Creating silent audio track for WRITE mode (required for API)');
     // Create a silent audio track to make the offer contain an audio section
     // This is needed for the OpenAI API even if we don't actually use audio
     try {
@@ -167,7 +172,7 @@ export async function createRealtimeConnection(
       const silentTrack = destination.stream.getAudioTracks()[0];
       silentTrack.enabled = false; // Make sure it's muted
       pc.addTrack(silentTrack);
-      console.log('[RTCSetup] Silent audio track added');
+      console.log('[RTCSetup] Silent audio track added successfully for WRITE mode');
     } catch (err) {
       console.error('[RTCSetup] Error creating silent audio track:', err);
       // Continue without the track - we still have the audio transceiver
@@ -246,53 +251,162 @@ export async function createRealtimeConnection(
   return { pc, dc };
 }
 
-// Utility: Replace or remove the microphone track on an active RTCPeerConnection
-export async function setMicrophoneEnabled(pc: RTCPeerConnection, enabled: boolean) {
-  const audioSender = pc.getSenders().find(sender => sender.track && sender.track.kind === 'audio');
-  if (enabled) {
-    // Add or replace with a new mic track
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const newTrack = stream.getAudioTracks()[0];
-      if (audioSender) {
-        console.log('[RTCSetup] setMicrophoneEnabled: Replacing track');
-        await audioSender.replaceTrack(newTrack);
-      } else {
-        console.log('[RTCSetup] setMicrophoneEnabled: Adding new track');
-        pc.addTrack(newTrack);
-      }
-      console.log('[RTCSetup] setMicrophoneEnabled: Microphone track active.');
-    } catch (err: any) {
-      console.error('[RTCSetup] setMicrophoneEnabled: getUserMedia failed:', err);
-      if (err.name === "NotFoundError") {
-        console.warn('[RTCSetup] setMicrophoneEnabled: Microphone not found (NotFoundError). PTT might not function until a mic is available.');
-        // Do not throw. If a track existed and was meant to be replaced, it might remain or be null.
-        // If no sender existed, no track is added.
-      } else if (err.name === "NotAllowedError") {
-        console.warn('[RTCSetup] setMicrophoneEnabled: Microphone access denied by user (NotAllowedError).');
-        // Optionally, re-throw or emit an event to inform UI
-        throw err; // Or handle by, e.g., forcing PTT off in UI
-      } else {
-        console.error('[RTCSetup] setMicrophoneEnabled: Unhandled getUserMedia error, re-throwing.');
-        throw err;
-      }
-    }
-  } else {
-    // Remove or disable the mic track
-    console.log('[RTCSetup] setMicrophoneEnabled: Disabling microphone track.');
-    if (audioSender) {
-      await audioSender.replaceTrack(null); // replaceTrack(null) is the correct way to remove/stop sending
-      if (audioSender.track) { // The track itself on the sender might still exist but is stopped by replaceTrack(null)
-        // audioSender.track.stop(); // stop() is usually called on the original track if you manage it explicitly
-      }
-    }
-    console.log('[RTCSetup] setMicrophoneEnabled: Microphone track disabled/removed.');
-  }
+// This function is replaced by the more comprehensive updateAudioSettings implementation
+// Keeping it for backwards compatibility, but redirecting to updateAudioSettings
+export async function setMicrophoneEnabled(
+  pc: RTCPeerConnection,
+  enabled: boolean
+): Promise<void> {
+  console.log(`[RTCSetup] setMicrophoneEnabled is deprecated. Use updateAudioSettings instead.`);
+  console.log(`[RTCSetup] Redirecting setMicrophoneEnabled(${enabled}) to updateAudioSettings`);
+  
+  // Find an audio element to pass to updateAudioSettings
+  // This isn't ideal, but needed for backwards compatibility
+  let audioElement: HTMLAudioElement | null = null;
+  
+  // Call the more comprehensive function
+  return updateAudioSettings(pc, audioElement, enabled);
 }
 
 // Utility: Mute or unmute the audio element for speaker control
 export function setAudioOutputEnabled(audioElement: HTMLAudioElement | null, enabled: boolean) {
   if (audioElement) {
     audioElement.muted = !enabled;
+  }
+}
+
+/**
+ * Updates audio settings for an existing connection when switching between write and speak modes
+ * @param pc The existing RTCPeerConnection
+ * @param audioElement The audio element to update
+ * @param enableAudio Whether audio should be enabled or disabled
+ * @returns Promise that resolves when the update is complete
+ */
+export async function updateAudioSettings(
+  pc: RTCPeerConnection | null,
+  audioElement: HTMLAudioElement | null,
+  enableAudio: boolean
+): Promise<void> {
+  if (!pc) {
+    console.error('[RTCSetup] Cannot update audio settings: No PeerConnection provided');
+    return;
+  }
+
+  console.log(`[RTCSetup] Updating audio settings: enableAudio=${enableAudio} (${enableAudio ? 'SPEAK mode' : 'WRITE mode'})`);
+  
+  // Update audio output settings
+  if (audioElement) {
+    audioElement.autoplay = enableAudio;
+    audioElement.muted = !enableAudio;
+    
+    // If we're disabling audio, also clear the srcObject to fully stop audio processing
+    if (!enableAudio && audioElement.srcObject) {
+      const oldSrcObject = audioElement.srcObject;
+      audioElement.srcObject = null;
+      
+      // If the old srcObject was a MediaStream, stop its tracks
+      if (oldSrcObject instanceof MediaStream) {
+        oldSrcObject.getTracks().forEach(track => {
+          track.enabled = false;
+          console.log(`[RTCSetup] Disabled track: ${track.kind}`);
+        });
+      }
+      
+      console.log(`[RTCSetup] Cleared audio element srcObject for WRITE mode`);
+    }
+    
+    console.log(`[RTCSetup] Audio element updated: autoplay=${audioElement.autoplay}, muted=${audioElement.muted}`);
+  }
+
+  try {
+    // Get all existing audio senders
+    const audioSenders = pc.getSenders().filter(sender => 
+      sender.track && sender.track.kind === 'audio'
+    );
+    
+    if (enableAudio) {
+      // SPEAK MODE: Enable existing tracks or add new ones if needed
+      console.log(`[RTCSetup] Switching to SPEAK mode - ${audioSenders.length} existing audio tracks found`);
+      
+      // Check if we have any active audio tracks
+      const hasActiveTrack = audioSenders.some(sender => 
+        sender.track && sender.track.enabled && !sender.track.muted
+      );
+      
+      if (hasActiveTrack) {
+        console.log('[RTCSetup] Active audio track already exists for SPEAK mode');
+        
+        // Ensure all tracks are enabled
+        audioSenders.forEach(sender => {
+          if (sender.track) {
+            sender.track.enabled = true;
+            console.log(`[RTCSetup] Ensured track is enabled: ${sender.track.id}`);
+          }
+        });
+      } else {
+        // No active tracks or no tracks at all, try to add microphone
+        console.log('[RTCSetup] No active audio tracks - attempting to add microphone for SPEAK mode');
+        
+        try {
+          // Get microphone access
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const micTrack = stream.getAudioTracks()[0];
+          
+          // If we have existing senders, replace their tracks
+          if (audioSenders.length > 0) {
+            const sender = audioSenders[0];
+            await sender.replaceTrack(micTrack);
+            console.log('[RTCSetup] Replaced existing track with microphone track');
+          } else {
+            // Otherwise add a new track
+            pc.addTrack(micTrack);
+            console.log('[RTCSetup] Added new microphone track');
+          }
+        } catch (err) {
+          console.error('[RTCSetup] Error accessing microphone:', err);
+          // Continue even without microphone - we'll be in listen-only mode
+        }
+      }
+    } else {
+      // WRITE MODE: Disable all audio tracks
+      console.log(`[RTCSetup] Switching to WRITE mode - disabling ${audioSenders.length} audio tracks`);
+      
+      for (const sender of audioSenders) {
+        if (sender.track) {
+          // Disable the track but don't stop it - we might need it again
+          sender.track.enabled = false;
+          console.log(`[RTCSetup] Disabled audio track: ${sender.track.id}`);
+        }
+      }
+      
+      // If we have no existing tracks, add a silent disabled track
+      if (audioSenders.length === 0) {
+        console.log('[RTCSetup] No existing audio tracks - adding silent disabled track for WRITE mode');
+        try {
+          const ctx = new AudioContext();
+          const oscillator = ctx.createOscillator();
+          const destination = ctx.createMediaStreamDestination();
+          oscillator.connect(destination);
+          oscillator.start();
+          const silentTrack = destination.stream.getAudioTracks()[0];
+          silentTrack.enabled = false; // Make sure it's disabled
+          pc.addTrack(silentTrack);
+          console.log('[RTCSetup] Added silent disabled track for WRITE mode');
+        } catch (err) {
+          console.error('[RTCSetup] Error creating silent audio track:', err);
+        }
+      }
+    }
+    
+    // Update the signaling state if needed - this may not be necessary but helps ensure
+    // that the server knows about our audio preferences
+    if (pc.signalingState === 'stable') {
+      console.log(`[RTCSetup] Audio settings successfully updated for ${enableAudio ? 'SPEAK' : 'WRITE'} mode`);
+    } else {
+      console.warn(`[RTCSetup] PeerConnection is in non-stable state: ${pc.signalingState}`);
+    }
+  } catch (error) {
+    console.error('[RTCSetup] Error updating audio settings:', error);
+    throw error;
   }
 }

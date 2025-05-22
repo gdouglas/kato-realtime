@@ -21,16 +21,26 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isClient, setIsClient] = useState(false);
   const pathname = usePathname();
+  const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
   }, []);
 
+  // Set audio playback mode based on the current pathname
+  useEffect(() => {
+    const shouldEnableAudio = pathname !== '/cases/kato/write';
+    
+    // Only update if there's an actual change to avoid unnecessary reconnections
+    if (isAudioPlaybackEnabled !== shouldEnableAudio) {
+      console.log(`[ClientLayout] Setting audio mode to ${shouldEnableAudio ? 'ENABLED' : 'DISABLED'} for path: ${pathname}`);
+      setIsAudioPlaybackEnabled(shouldEnableAudio);
+    }
+  }, [pathname, isAudioPlaybackEnabled]);
+
   const agentConfigsToUse = allAgentSets[defaultAgentSetKey];
   const urlCodec = typeof window !== 'undefined' ? (new URLSearchParams(window.location.search).get('codec') || 'opus') : 'opus';
   
-  const isAudioPlaybackEnabled = pathname !== '/cases/kato/write';
-
   if (!isClient) {
     // Important: When returning null for SSR, ensure the parent layout.tsx still renders <html> and <body> tags
     // so the page structure is valid. Here, we return null, and layout.tsx will handle the html/body.
@@ -71,6 +81,7 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
                   {children}
                   {/* Settings Modal overlays all content */}
                   <SettingsModal />
+                  <audio ref={audioRef} id="app-wide-audio-player" className="hidden" />
                 </AgentProvider>
               </KatoRTCProvider>
             </AgentLifecycleProvider>

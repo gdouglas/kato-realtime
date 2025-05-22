@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranscript } from '@/app/contexts/TranscriptContext';
@@ -99,6 +99,19 @@ const WritePage = () => {
     };
   }, [eventBus]);
 
+  // Log audio mode status to aid in debugging
+  useEffect(() => {
+    // Listen for audio playback status changes
+    const handleAudioPlaybackStatusChanged = (enabled: boolean) => {
+      console.log(`[WritePage] Audio playback ${enabled ? 'enabled' : 'disabled'}`);
+      addTranscriptBreadcrumb(`Audio ${enabled ? 'enabled' : 'disabled'} for write mode`);
+    };
+    
+    const unsubscribe = eventBus.on(KatoEvents.AUDIO_PLAYBACK_ENABLED_CHANGED, handleAudioPlaybackStatusChanged);
+    
+    return () => unsubscribe();
+  }, [eventBus, addTranscriptBreadcrumb]);
+
   // Ensure agent-specific conversation is loaded on initial page render
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -188,22 +201,6 @@ const WritePage = () => {
     return item;
   });
 
-  console.log(`[WritePage] Filtered ${transcriptItems.length} transcript items to ${messages.length} message items`);
-  console.log(`[WritePage] Current agent: ${currentAgentConfig?.name}`);
-  
-  // Check if messages are correctly associated with the current agent
-  if (currentAgentConfig?.name) {
-    const messagesForCurrentAgent = messages.filter(m => m.agentName === currentAgentConfig.name);
-    console.log(`[WritePage] Messages for current agent ${currentAgentConfig.name}: ${messagesForCurrentAgent.length}/${messages.length}`);
-    
-    // Debug info about other agent messages that might be showing
-    const otherAgentMessages = messages.filter(m => m.agentName && m.agentName !== currentAgentConfig.name);
-    if (otherAgentMessages.length > 0) {
-      console.log(`[WritePage] WARNING: Found ${otherAgentMessages.length} messages for other agents`, 
-        otherAgentMessages.map(m => `${m.role}:${m.agentName}`).join(', '));
-    }
-  }
-
   const onToggleConnection = () => {
     if (!currentAgentConfig) {
       addTranscriptBreadcrumb("No agent selected. Cannot connect.");
@@ -228,11 +225,23 @@ const WritePage = () => {
     }
   };
 
-  const handleNavigateToSpeak = () => {
-    console.log("[WritePage] Navigating to speak page");
-    eventBus.emit(KatoEvents.NAVIGATE_TO_WRITE_CLICKED); // Using same event for consistency
-    router.push('/cases/kato/speak');
-  };
+  // Function to navigate to the speak page using the event-driven approach
+  const handleNavigateToSpeak = useCallback(() => {
+    console.log(`[WritePage] User requested to navigate to speak page.`);
+    
+    // Store current agent in session storage for recovery if needed
+    if (currentAgentConfig?.name && typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.setItem('lastSelectedAgent', currentAgentConfig.name);
+        console.log(`[WritePage] Stored agent in session storage: ${currentAgentConfig.name}`);
+      } catch (e) {
+        console.error(`[WritePage] Failed to store agent:`, e);
+      }
+    }
+    
+    // Navigate to speak page, the XState machine will handle mode changes
+    router.push("/cases/kato/speak");
+  }, [router, currentAgentConfig]);
 
   const handleCreateDDx = async () => {
     if (!currentAgentConfig) {
@@ -539,3 +548,4 @@ const WritePage = () => {
 };
 
 export default WritePage;
+

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, ReactNode } from 'react';
+import React, { createContext, useContext, ReactNode, useEffect, useRef } from 'react';
 import { useMachine } from '@xstate/react';
 import {
   agentLifecycleMachine,
@@ -15,6 +15,8 @@ import { AgentConfig } from '@/app/types';
 import { useEventBus } from './EventBusContext';
 import { useTranscript } from './TranscriptContext';
 import { useEvent } from './EventContext';
+import { KatoEvents } from '@/app/cases/kato/KatoEvents';
+import { updateAudioSettings } from '@/app/lib/realtimeConnection';
 
 // Import your agent configurations
 // TODO: This should ideally be passed as a prop to the provider if it can vary,
@@ -60,6 +62,10 @@ export const AgentLifecycleProvider: React.FC<AgentLifecycleProviderProps> = ({
   const { addTranscriptBreadcrumb } = useTranscript();
   const { logClientEvent, logServerEvent } = useEvent();
 
+  // Create ref for tracking last reconnection time - moved outside useEffect
+  const lastReconnectionTimeRef = useRef<number>(0);
+  const DEBOUNCE_TIME = 2000; // Minimum time between reconnections (2 seconds)
+
   const machineInput: AgentLifecycleMachineInput = {
     agentConfigs: initialConfigs,
     urlCodec,
@@ -78,6 +84,23 @@ export const AgentLifecycleProvider: React.FC<AgentLifecycleProviderProps> = ({
   const [state, send, actorRef] = useMachine(agentLifecycleMachine, {
     input: machineInput,
   });
+
+  // Effect to update audio playback enabled status when it changes from props
+  useEffect(() => {
+    // Don't send during initial setup to avoid duplicate event
+    if (state.context.isAudioPlaybackEnabled !== isAudioPlaybackEnabled) {
+      console.log(`[AgentLifecycleProvider] Audio playback setting changed to: ${isAudioPlaybackEnabled}`);
+      
+      // Send event to XState machine to update its context
+      // The state machine will handle reconnection logic if needed
+      send({ 
+        type: 'SETTING_AUDIO_OUTPUT_ENABLED', 
+        value: isAudioPlaybackEnabled 
+      });
+      
+      // Let the state machine handle reconnection if needed
+    }
+  }, [isAudioPlaybackEnabled, send, state.context]);
 
   // Derived state for easier consumption by components
   const currentAgentConfig = state.context.currentAgentConfig;

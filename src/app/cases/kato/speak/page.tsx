@@ -144,11 +144,23 @@ function KatoSpeakPageContent() {
   useEffect(() => {
     if (selectedAgentName) {
       setShowIntroScreen(false);
+      console.log(`[SpeakPage] Agent selected: ${selectedAgentName}, hiding intro screen`);
     } else {
-      setShowIntroScreen(true);
-      introButtonClickedRef.current = false;
+      // Only show intro screen if there's no reconnection in progress
+      const isReconnecting = sessionStatus === "CONNECTING" || isSwitchingInProgress;
+      const shouldShowIntro = !isReconnecting;
+      
+      console.log(`[SpeakPage] No agent selected, ${shouldShowIntro ? 'showing' : 'not showing'} intro screen (reconnecting: ${isReconnecting})`);
+      setShowIntroScreen(shouldShowIntro);
+      
+      if (!shouldShowIntro) {
+        // If we're reconnecting, don't reset the intro button state
+        console.log(`[SpeakPage] Reconnection in progress, preserving intro button state`);
+      } else {
+        introButtonClickedRef.current = false;
+      }
     }
-  }, [selectedAgentName]);
+  }, [selectedAgentName, sessionStatus, isSwitchingInProgress]);
 
   useEffect(() => {
     const handleAgentChangedPageLogic = (data?: { newAgentName?: string; agentConfig?: AgentConfig }) => { 
@@ -288,11 +300,23 @@ function KatoSpeakPageContent() {
     router.push('/cases/kato/ddx');
   }, [router, sessionStatus, agentLifecycle, addTranscriptBreadcrumb]);
 
+  // Function to navigate to the write page using the event-driven approach
   const handleNavigateToWrite = useCallback(() => {
-    console.log("[SpeakPage] Navigating to write page");
-    eventBus.emit(KatoEvents.NAVIGATE_TO_WRITE_CLICKED);
-    router.push('/cases/kato/write');
-  }, [router, eventBus]);
+    console.log(`[SpeakPage] User requested to navigate to write page.`);
+    
+    // Store current agent in session storage for recovery if needed
+    if (currentAgentConfig?.name && typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.setItem('lastSelectedAgent', currentAgentConfig.name);
+        console.log(`[SpeakPage] Stored agent in session storage: ${currentAgentConfig.name}`);
+      } catch (e) {
+        console.error(`[SpeakPage] Failed to store agent:`, e);
+      }
+    }
+    
+    // Navigate to write page, the XState machine will handle mode changes
+    router.push("/cases/kato/write");
+  }, [router, currentAgentConfig]);
 
   useEffect(() => { 
     const calculatePositions = () => {
@@ -392,12 +416,12 @@ function KatoSpeakPageContent() {
 
   useEffect(() => {
     const handleAudioPlaybackEnabledChange = (isEnabled: boolean) => {
-      console.log(`[SpeakPage] Audio playback toggled: ${isEnabled}`);
-      eventBus.emit(KatoEvents.AUDIO_PLAYBACK_ENABLED_CHANGED, isEnabled);
+      console.log(`[SpeakPage] Audio playback ${isEnabled ? 'enabled' : 'disabled'}`);
+      addTranscriptBreadcrumb(`Audio ${isEnabled ? 'enabled' : 'disabled'} for speak mode`);
     };
     const sub = eventBus.on(KatoEvents.AUDIO_PLAYBACK_ENABLED_CHANGED, handleAudioPlaybackEnabledChange);
     return () => sub();
-  }, [eventBus]);
+  }, [eventBus, addTranscriptBreadcrumb]);
 
   useEffect(() => {
     if (sessionStatus === "CONNECTED" && currentAgentConfig && !hasDoneInitialAgentSetupRef.current) {
@@ -524,6 +548,38 @@ function KatoSpeakPageContent() {
   useEffect(() => {
     setCurrentAudioInputMode(pushToTalk ? "ptt" : "conversation");
   }, [pushToTalk]);
+
+  // Add effect to keep track of navigation source
+  useEffect(() => {
+    // Try to detect if we came from the write page via navigation
+    const fromWritePage = typeof window !== 'undefined' && window.performance?.navigation?.type === 1 && 
+                        document.referrer.includes('/cases/kato/write');
+    
+    if (fromWritePage && !selectedAgentName && currentAgentConfig?.name) {
+      console.log(`[SpeakPage] Detected navigation from write page, ensuring agent selection is preserved: ${currentAgentConfig.name}`);
+      // Re-select the agent if it was lost during navigation
+      selectAgent(currentAgentConfig.name);
+    }
+  }, [selectedAgentName, currentAgentConfig, selectAgent]);
+
+  // Add effect to recover agent selection from session storage if needed
+  useEffect(() => {
+    // Only attempt recovery if no agent is currently selected and we're not already switching
+    if (!selectedAgentName && !isSwitchingInProgress && typeof window !== 'undefined') {
+      try {
+        const lastAgent = window.sessionStorage.getItem('lastSelectedAgent');
+        if (lastAgent) {
+          console.log(`[SpeakPage] Recovering agent selection from session storage: ${lastAgent}`);
+          selectAgent(lastAgent);
+          
+          // Clear the stored value to prevent unexpected recoveries
+          window.sessionStorage.removeItem('lastSelectedAgent');
+        }
+      } catch (e) {
+        console.error(`[SpeakPage] Failed to recover agent from session storage:`, e);
+      }
+    }
+  }, [selectedAgentName, isSwitchingInProgress, selectAgent]);
 
   if (showIntroScreen) {
     return <KatoIntroScreen onStartWithPatient={handleStartWithPatient} onStartWithPreceptor={handleStartWithPreceptor} />;
