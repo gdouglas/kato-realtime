@@ -62,6 +62,7 @@ async def create_session(settings: Settings = Depends(get_settings)):
                 
                 if isinstance(client_secret, dict) and "value" in client_secret:
                     client_secret_value = client_secret["value"]
+                    token_expires_at = client_secret["expires_at"]
                 else:
                     client_secret_value = client_secret
                 
@@ -71,7 +72,7 @@ async def create_session(settings: Settings = Depends(get_settings)):
                         "value": client_secret_value
                     },
                     "id": openai_response_data.get("id"),
-                    "expires_at": openai_response_data.get("expires_at")
+                    "expires_at": token_expires_at
                 }
                 return formatted_data
             else:
