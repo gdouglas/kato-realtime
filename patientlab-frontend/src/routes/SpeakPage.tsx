@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import { useMachine } from '@xstate/react';
 import { connectionMachine } from '../machines/connectionMachine';
-import { fetchEphemeralToken } from '@/api/openaiApi';
 import { createWebRTCConnection } from '../services/webrtcService';
 
 // A little spinner + error‐badge component
@@ -14,16 +13,7 @@ const ErrorIndicator: React.FC<{ message?: string; onRetry(): void }> = ({ messa
 );
 
 const SpeakPage: React.FC = () => {
-  // override the machine’s fetchToken so XState can actually find it
-  const [state, send] = useMachine(connectionMachine, {
-    services: {
-      fetchToken: async () => {
-        // this is exactly what your machine’s service expects
-        const result = await fetchEphemeralToken();
-        return typeof result === 'string' ? result : result.token;
-      }
-    }
-  });
+  const [state, send] = useMachine(connectionMachine);
 
   // start the fetch on mount
   useEffect(() => {

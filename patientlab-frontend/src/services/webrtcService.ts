@@ -1,51 +1,48 @@
-// src/services/webrtcService.ts
-import type { ConnectionEvent } from '@/machines/connectionMachine';
-import { fetchEphemeralToken } from '@/api/openaiApi'; // your FastAPI helper
+import { createActor } from "xstate";
+import { connectionMachine } from "@/machines/connectionMachine";
+import { createRealtimeConnection } from "./realtimeConnection";
 
 /**
- * Invoked by XState. Sets up a WebRTC connection to the OpenAI Realtime API,
- * emits ICE_CANDIDATE events as they arrive, and emits OPENAI_READY once connected.
+ * initializeWebRTC:
+ * - Creates a service (interpreter) for connectionMachine
+ * - Subscribes to state updates to react to token fetch success or errors
+ * - Starts the service and sends INIT_CONNECTION
  */
-export function createWebRTCConnection(apiKey: string) {
-  return async (sendBack: (evt: ConnectionEvent) => void) => {
-    // 1. Fetch any server‐side session configuration if needed
-    const sessionKey = await fetchEphemeralToken();
+export function initializeWebRTC(
+  audioElementRef: React.RefObject<HTMLAudioElement | null>,
+  codec: string,
+  enableAudio: boolean
+) {
+  // Create service (interpreter) for the machine
+  const service = interpret(connectionMachine);
 
-    // 2. Create the RTCPeerConnection
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    });
+  // Subscribe to state changes
+  const subscription = service.subscribe((state) => {
+    if (state.matches("connected") && state.context.token) {
+      createRealtimeConnection(
+        state.context.token,
+        audioElementRef,
+        codec,
+        enableAudio
+      )
+        .then(({ pc, dc }) => {
+          console.log("WebRTC connected:", pc, dc);
+          // TODO: store or expose pc/dc as needed
+        })
+        .catch((err) => {
+          console.error("WebRTC setup failed:", err);
+        });
+    }
 
-    // 3. Open a datachannel (or configure your media tracks here)
-    const dc = pc.createDataChannel('openai');
+    if (state.matches("connectionError")) {
+      console.error("Token fetch error:", state.context.error);
+    }
+  });
 
-    // 4. Relay local ICE candidates into the machine
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        sendBack({ type: 'ICE_CANDIDATE', candidate: e.candidate });
-      }
-    };
+  // Start the service and fetch token
+  service.start();
+  service.send("INIT_CONNECTION");
 
-    // 5. When connected, notify the machine with both pc & dc
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'connected') {
-        sendBack({ type: 'OPENAI_READY', pc, dc });
-      }
-    };
-
-    // 6. Kick off the SDP offer/answer exchange:
-    //    - createOffer, setLocalDescription, send to your backend or directly to OpenAI
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    // TODO: send `offer.sdp` + sessionKey to your FastAPI endpoint,
-    // receive `answer.sdp`, then:
-    // await pc.setRemoteDescription(answer)
-
-    // 7. Return a cleanup callback so XState can tear it down
-    return () => {
-      dc.close();
-      pc.close();
-    };
-  };
+  // Return both service and subscription to allow cleanup if needed
+  return { service, subscription };
 }
