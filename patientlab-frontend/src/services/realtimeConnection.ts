@@ -1,39 +1,19 @@
-import type { RefObject } from "react";
+import type { RefObject } from 'react';
 
 // -----------------------------
-// OpenAI Realtime configuration
+// OpenAI Realtime HTTP-based SDP negotiation
 // -----------------------------
-const OPENAI_RTC_API = "https://api.openai.com/v1/realtime/sessions";
-
-/**
- * Exchanges an SDP offer for an answer with OpenAI's Realtime API.
- * Replace this with the exact HTTP call specified in your backend docs.
- */
-async function sendOfferToOpenAI(ephemeralKey: string, offerSDP: string): Promise<string> {
-  const response = await fetch(`${OPENAI_RTC_API}/${ephemeralKey}/offer`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${ephemeralKey}`,
-    },
-    body: JSON.stringify({ sdp: offerSDP }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenAI offer failed – ${response.status}`);
-  }
-
-  const { sdp: answer } = (await response.json()) as { sdp: string };
-  return answer;
-}
+const OPENAI_RTC_API = 'https://api.openai.com/v1/realtime';
 
 /**
  * Creates a full WebRTC data+audio connection to OpenAI's Realtime API.
+ * Uses HTTP POST with SDP instead of WebSockets.
  *
  * @param ephemeralKey  – token obtained via your fetchEphemeralToken() call
  * @param audioElement  – <audio> element ref for playback
  * @param codec         – e.g. "opus"
  * @param enableAudio   – whether to request / play remote audio
+ * @param model         – model name for realtime preview (default: gpt-4o-realtime-preview-2024-12-17)
  *
  * @returns { pc, dc }  – the live RTCPeerConnection and DataChannel
  */
@@ -41,57 +21,97 @@ export async function createRealtimeConnection(
   ephemeralKey: string,
   audioElement: RefObject<HTMLAudioElement | null>,
   codec: string,
-  enableAudio: boolean
+  enableAudio: boolean,
+  model: string = 'gpt-4o-mini-realtime-preview-2024-12-17'
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel }> {
-  console.log("[RTC] Creating RTCPeerConnection…");
+  console.log('[RTC] Creating RTCPeerConnection…');
 
   // 1. PeerConnection baseline config
   const pc = new RTCPeerConnection({
     iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-    ],
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ]
   });
 
-  // 2. Optional local media tracks (write‑mode only needs data channel)
+  // 2. Optional local media tracks
   if (enableAudio) {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
+    for (const track of stream.getAudioTracks()) {
+      pc.addTrack(track, stream);
+    }
   }
 
-  // 3. Create a reliable ordered data channel for text exchange
-  const dc = pc.createDataChannel("realtime", { ordered: true });
+  // 3. Set up data channel for server events
+  const dc = pc.createDataChannel('oai-events');
+  dc.addEventListener('message', (e) => {
+    console.log('[RTC Event]', e.data);
+  });
 
   // 4. Remote audio playback handler
   pc.ontrack = (ev) => {
     if (audioElement.current) {
       const [remoteStream] = ev.streams;
       audioElement.current.srcObject = remoteStream;
+      audioElement.current.autoplay = true;
       audioElement.current.play().catch(console.error);
     }
   };
 
-  // 5. ICE candidate debugging (optional)
+  // 5. ICE state logging
   pc.oniceconnectionstatechange = () =>
     console.log(`[RTC] ICE state → ${pc.iceConnectionState}`);
 
-  // 6. Negotiate SDP
+  // 6. SDP negotiation via HTTP POST
   const offer = await pc.createOffer({ offerToReceiveAudio: enableAudio });
   await pc.setLocalDescription(offer);
 
-  // 6a. Wait for ICE gathering to finish so we have a complete offer
+  // Wait for ICE gathering to complete
   await new Promise<void>((resolve) => {
-    if (pc.iceGatheringState === "complete") return resolve();
-    pc.onicegatheringstatechange = () => {
-      if (pc.iceGatheringState === "complete") resolve();
+    if (pc.iceGatheringState === 'complete') return resolve();
+    const listener = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', listener as any);
+        resolve();
+      }
     };
+    pc.addEventListener('icegatheringstatechange', listener as any);
   });
 
-  console.log("[RTC] Sending offer to OpenAI…");
-  const answerSDP = await sendOfferToOpenAI(ephemeralKey, pc.localDescription!.sdp!);
+  console.log('[RTC] Sending SDP to OpenAI…');
+  const response = await fetch(`${OPENAI_RTC_API}?model=${model}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${ephemeralKey}`,
+      'Content-Type': 'application/sdp'
+    },
+    body: pc.localDescription!.sdp || ''
+  });
 
-  console.log("[RTC] Received answer – setting remote description…");
-  await pc.setRemoteDescription({ type: "answer", sdp: answerSDP });
+  if (!response.ok) {
+    throw new Error(`SDP negotiation failed (${response.status})`);
+  }
+
+  const answerSDP = await response.text();
+  console.log('[RTC] Received SDP answer, setting remote description…');
+  await pc.setRemoteDescription({ type: 'answer', sdp: answerSDP });
 
   return { pc, dc };
+}
+
+/**
+ * Disconnects an active RTCPeerConnection.
+ * Cleans up data channels, tracks, and connection state.
+ */
+export function disconnectRealtimeConnection(pc: RTCPeerConnection, dc?: RTCDataChannel) {
+  console.log('[RTC] Disconnecting…');
+
+  try {
+    dc?.close();
+    pc.getSenders().forEach(sender => sender.track?.stop());
+    pc.getReceivers().forEach(receiver => receiver.track?.stop());
+    pc.close();
+  } catch (err) {
+    console.error('[RTC] Error while disconnecting:', err);
+  }
 }

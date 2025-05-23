@@ -1,38 +1,87 @@
-// src/routes/SpeakPage.tsx
-import { useEffect, useRef } from 'react';
-import { useEphemeralToken } from '@/hooks/useEphemeralToken';
-import { createRealtimeConnection } from '@/services/realtimeConnection';
+import React, { useRef, useState, useEffect } from 'react';
+import { FiCircle, FiCheckCircle, FiXCircle } from 'react-icons/fi';
+import { Button } from '@/components/ui/button';
+import { initializeWebRTC } from '@/services/webrtcService';
+import { disconnectRealtimeConnection } from '@/services/realtimeConnection';
 
+/**
+ * SpeakPage: Handles starting and stopping a WebRTC connection to OpenAI,
+ * displaying live connection status via react-icons.
+ */
 export default function SpeakPage() {
-  const { tokenStatus, token, error, load } = useEphemeralToken();
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const didFetchToken = useRef(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [pc, setPc] = useState<RTCPeerConnection | null>(null);
+  const [dc, setDc] = useState<RTCDataChannel | null>(null);
 
-  // fetch immediately on mount
-  useEffect(() => {
-    if (didFetchToken.current) {
-      return; // don't fetch the token twice, it's in progress
+  // 'idle' | 'connecting' | 'connected' | 'failed'
+  const [connectionState, setConnectionState] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
+
+  // Map state to icon
+  const StatusIcon = () => {
+    switch (connectionState) {
+      case 'connecting':
+        return <FiCircle className="text-yellow-500 animate-pulse" size={24} />;
+      case 'connected':
+        return <FiCheckCircle className="text-green-500" size={24} />;
+      case 'failed':
+        return <FiXCircle className="text-red-500" size={24} />;
+      default:
+        return <FiCircle className="text-gray-400" size={24} />;
     }
-    didFetchToken.current = true;
-    load();
-  }, [load]);
+  };
 
-  // once we have a token, create the connection
-  useEffect(() => {
-    if (tokenStatus === 'success' && token) {
-      createRealtimeConnection(token, audioRef, 'opus', true).catch(console.error);
+  // Initiate connection
+  const handleConnect = async () => {
+    setConnectionState('connecting');
+    try {
+      const { pc: peer, dc: channel } = await initializeWebRTC(audioRef, 'opus', true);
+      // listen for ICE state changes
+      peer.oniceconnectionstatechange = () => {
+        const s = peer.iceConnectionState;
+        if (s === 'connected' || s === 'completed') {
+          setConnectionState('connected');
+        } else if (s === 'failed' || s === 'disconnected') {
+          setConnectionState('failed');
+        } else {
+          setConnectionState('connecting');
+        }
+      };
+      setPc(peer);
+      setDc(channel);
+    } catch (err) {
+      console.error('Connection failed', err);
+      setConnectionState('failed');
     }
-  }, [tokenStatus, token]);
+  };
 
-  /* ---------- trivial UI ---------- */
-  if (tokenStatus === 'loading') return <p>Connecting…</p>;
-  if (tokenStatus === 'error')   return <p style={{ color: 'crimson' }}>❌ {error}<br/><button onClick={load}>Retry</button></p>;
+  // Disconnect and cleanup
+  const handleDisconnect = () => {
+    if (pc) {
+      disconnectRealtimeConnection(pc, dc || undefined);
+      setPc(null);
+      setDc(null);
+      setConnectionState('idle');
+    }
+  };
 
   return (
-    <div>
-      <h1>Speak Mode</h1>
-      <audio ref={audioRef} />
-      {/* rest of your page */}
+    <div className="flex flex-col items-center p-6 space-y-4">
+      <div className="flex items-center space-x-2">
+        <StatusIcon />
+        <span className="capitalize font-medium">{connectionState}</span>
+      </div>
+
+      {connectionState !== 'connected' ? (
+        <Button onClick={handleConnect} className="w-full max-w-xs text-black">
+          Connect
+        </Button>
+      ) : (
+        <Button onClick={handleDisconnect} variant="destructive" className="w-full max-w-xs text-black">
+          Disconnect
+        </Button>
+      )}
+
+      <audio ref={audioRef} className="w-full max-w-xs" controls />
     </div>
   );
 }
