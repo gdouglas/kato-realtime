@@ -6,7 +6,7 @@ import { useMachine } from '@xstate/react';
 import { appMachine } from './machines/appMachine';
 import { createBrowserInspector } from '@statelyai/inspect';
 
-const { inspect } = createBrowserInspector({ autoStart: true });
+const { inspect } = createBrowserInspector({ autoStart: false });
 
 export default function App() {
   const [state, send] = useMachine(appMachine, { inspect });

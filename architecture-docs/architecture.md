@@ -9,38 +9,49 @@ This guide provides clear structure and modularity for your application, making 
 ### **Project Structure**
 
 ```
-frontend/
-├── public/
-├── src/
-│   ├── main.tsx
+patientlab-frontend/
+├── README.md
+├── components.json
+├── eslint.config.js
+├── index.html
+├── package-lock.json
+├── package.json
+├── public
+│   └── vite.svg
+├── src
+│   ├── App.css
 │   ├── App.tsx
-│   ├── routes/
-│   │   ├── SpeakPage.tsx
-│   │   └── WritePage.tsx
-│   ├── components/
-│   │   ├── Avatar/
-│   │   ├── AgentSwitcher/
-│   │   ├── MicActivityIndicator/
-│   │   ├── TurnIndicator/
-│   │   ├── TranscriptExporter/
-│   │   ├── SettingsPanel/
-│   │   ├── DDxWizard/
-│   │   ├── FeedbackScreen/
-│   │   └── ErrorHandler/
-│   ├── machines/
+│   ├── api
+│   │   └── openaiApi.ts
+│   ├── assets
+│   │   └── react.svg
+│   ├── components
+│   │   ├── MicActivityIndicator.tsx
+│   │   └── ui
+│   │       ├── button.tsx
+│   │       ├── label.tsx
+│   │       └── switch.tsx
+│   ├── index.css
+│   ├── lib
+│   │   └── utils.ts
+│   ├── machines
 │   │   ├── appMachine.ts
-│   │   ├── agentMachine.ts
 │   │   ├── audioMachine.ts
 │   │   └── connectionMachine.ts
-│   ├── api/
-│   │   ├── openaiApi.ts
-│   │   └── apexLogger.ts
-│   ├── types/
-│   └── utils/
-│       └── storage.ts
-├── vite.config.ts
+│   ├── main.tsx
+│   ├── routes
+│   │   ├── SpeakPage.tsx
+│   │   └── WritePage.tsx
+│   ├── services
+│   │   └── webrtcService.ts
+│   ├── types
+│   ├── utils
+│   │   └── storage.ts
+│   └── vite-env.d.ts
+├── tsconfig.app.json
 ├── tsconfig.json
-└── package.json
+├── tsconfig.node.json
+└── vite.config.ts
 ```
 
 ### **Core Technologies:**
