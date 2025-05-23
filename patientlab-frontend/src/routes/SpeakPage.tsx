@@ -1,49 +1,38 @@
-import React, { useEffect } from 'react';
-import { useMachine } from '@xstate/react';
-import { connectionMachine } from '../machines/connectionMachine';
-import { createWebRTCConnection } from '../services/webrtcService';
+// src/routes/SpeakPage.tsx
+import { useEffect, useRef } from 'react';
+import { useEphemeralToken } from '@/hooks/useEphemeralToken';
+import { createRealtimeConnection } from '@/services/realtimeConnection';
 
-// A little spinner + error‐badge component
-const Spinner = () => <div>🔄 Connecting…</div>;
-const ErrorIndicator: React.FC<{ message?: string; onRetry(): void }> = ({ message, onRetry }) => (
-  <div style={{ color: 'crimson' }}>
-    <p>❌ {message ?? 'Unknown error'}</p>
-    <button onClick={onRetry}>Retry</button>
-  </div>
-);
+export default function SpeakPage() {
+  const { tokenStatus, token, error, load } = useEphemeralToken();
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const didFetchToken = useRef(false);
 
-const SpeakPage: React.FC = () => {
-  const [state, send] = useMachine(connectionMachine);
-
-  // start the fetch on mount
+  // fetch immediately on mount
   useEffect(() => {
-    send({ type: 'INIT_CONNECTION' });
-  }, [send]);
-
-  // once we’re in the final “connected” state, hand off to WebRTC
-  useEffect(() => {
-    if (state.matches('connected') && state.context.token) {
-      createWebRTCConnection(state.context.token);
+    if (didFetchToken.current) {
+      return; // don't fetch the token twice, it's in progress
     }
-  }, [state]);
+    didFetchToken.current = true;
+    load();
+  }, [load]);
 
-  // render a spinner during the fetch
-  if (state.matches('idle') || state.matches('fetchingToken')) {
-    return <Spinner />;
-  }
+  // once we have a token, create the connection
+  useEffect(() => {
+    if (tokenStatus === 'success' && token) {
+      createRealtimeConnection(token, audioRef, 'opus', true).catch(console.error);
+    }
+  }, [tokenStatus, token]);
 
-  // render an error badge when the token service fails
-  if (state.matches('connectionError')) {
-    return <ErrorIndicator message={state.context.error} onRetry={() => send({ type: 'RETRY' })} />;
-  }
+  /* ---------- trivial UI ---------- */
+  if (tokenStatus === 'loading') return <p>Connecting…</p>;
+  if (tokenStatus === 'error')   return <p style={{ color: 'crimson' }}>❌ {error}<br/><button onClick={load}>Retry</button></p>;
 
-  // finally, your normal “Speak” UI
   return (
     <div>
       <h1>Speak Mode</h1>
-      {/* …your real audio controls here… */}
+      <audio ref={audioRef} />
+      {/* rest of your page */}
     </div>
   );
-};
-
-export default SpeakPage;
+}
