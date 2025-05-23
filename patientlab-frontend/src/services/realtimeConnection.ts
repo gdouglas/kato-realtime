@@ -7,21 +7,21 @@ const OPENAI_RTC_API = 'https://api.openai.com/v1/realtime';
 
 /**
  * Creates a full WebRTC data+audio connection to OpenAI's Realtime API.
- * Uses HTTP POST with SDP instead of WebSockets.
+ * Uses HTTP POST with SDP and supports modalities (audio/text).
  *
  * @param ephemeralKey  – token obtained via your fetchEphemeralToken() call
- * @param audioElement  – <audio> element ref for playback
+ * @param audioElement  – <audio> element ref for playback (required if 'audio' modality)
  * @param codec         – e.g. "opus"
- * @param enableAudio   – whether to request / play remote audio
- * @param model         – model name for realtime preview (default: gpt-4o-realtime-preview-2024-12-17)
+ * @param modalities    – array of enabled modalities: 'audio' and/or 'text'
+ * @param model         – model name for realtime preview
  *
- * @returns { pc, dc }  – the live RTCPeerConnection and DataChannel
+ * @returns { pc, dc }  – the live RTCPeerConnection and optional DataChannel for text
  */
 export async function createRealtimeConnection(
   ephemeralKey: string,
   audioElement: RefObject<HTMLAudioElement | null>,
   codec: string,
-  enableAudio: boolean,
+  modalities: Array<'audio' | 'text'>,
   model: string = 'gpt-4o-mini-realtime-preview-2024-12-17'
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel }> {
   console.log('[RTC] Creating RTCPeerConnection…');
@@ -33,7 +33,8 @@ export async function createRealtimeConnection(
       { urls: 'stun:stun1.l.google.com:19302' }
     ]
   });
-
+  const enableAudio = modalities.includes('audio');
+  const enableText = modalities.includes('text');
   // 2. Optional local media tracks
   if (enableAudio) {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -41,8 +42,9 @@ export async function createRealtimeConnection(
       pc.addTrack(track, stream);
     }
   }
+  
 
-  // 3. Set up data channel for server events
+  // 3. Set up data channel for text and server events
   const dc = pc.createDataChannel('oai-events');
   dc.addEventListener('message', (e) => {
     console.log('[RTC Event]', e.data);

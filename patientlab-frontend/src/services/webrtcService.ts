@@ -11,7 +11,8 @@ import { createRealtimeConnection } from './realtimeConnection';
 export async function initializeWebRTC(
   audioElementRef: RefObject<HTMLAudioElement | null>,
   codec: string,
-  enableAudio: boolean
+  modalities: ["audio", "text"],
+  model: string = 'gpt-4o-mini-realtime-preview-2024-12-17'
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel }> {
   try {
     // 1️⃣ Get token
@@ -25,8 +26,8 @@ export async function initializeWebRTC(
       token,
       audioElementRef,
       codec,
-      enableAudio,
-      "gpt-4o-mini-realtime-preview-2024-12-17"
+      modalities,
+      model
     );
 
     console.log('[WebRTC] Connection established');

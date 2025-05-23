@@ -34,7 +34,7 @@ export default function SpeakPage() {
   const handleConnect = async () => {
     setConnectionState('connecting');
     try {
-      const { pc: peer, dc: channel } = await initializeWebRTC(audioRef, 'opus', true);
+      const { pc: peer, dc: channel } = await initializeWebRTC(audioRef, 'opus', ["audio", "text"]);
       // listen for ICE state changes
       peer.oniceconnectionstatechange = () => {
         const s = peer.iceConnectionState;
