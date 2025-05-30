@@ -65,7 +65,22 @@ export default function SpeakPage() {
   useEffect(() => {
     if (dc) {
       dc.onmessage = (event) => {
-        setMessages((prev) => [...prev, String(event.data)]);
+        let parsed;
+        try {
+          parsed = JSON.parse(event.data as string);
+        } catch {
+          parsed = null;
+        }
+        if (parsed && parsed.type === 'transcript' && parsed.payload?.text) {
+          // Transcription event from server
+          setMessages((prev) => [...prev, parsed.payload.text]);
+        } else if (parsed && parsed.type && parsed.payload) {
+          // Other structured event
+          setMessages((prev) => [...prev, `${parsed.type}: ${JSON.stringify(parsed.payload)}`]);
+        } else {
+          // Fallback for raw messages
+          setMessages((prev) => [...prev, String(event.data)]);
+        }
       };
     }
   }, [dc]);
