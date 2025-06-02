@@ -270,9 +270,45 @@ export async function setMicrophoneEnabled(
 
 // Utility: Mute or unmute the audio element for speaker control
 export function setAudioOutputEnabled(audioElement: HTMLAudioElement | null, enabled: boolean) {
-  if (audioElement) {
-    audioElement.muted = !enabled;
+  if (!audioElement) {
+    console.warn('[RTCSetup] setAudioOutputEnabled: No audio element provided');
+    return;
   }
+
+  console.log(`[RTCSetup] setAudioOutputEnabled: ${enabled ? 'Enabling' : 'Disabling'} audio output`);
+  
+  // Update the basic properties
+  audioElement.muted = !enabled;
+  audioElement.autoplay = enabled;
+  
+  if (enabled) {
+    // When re-enabling audio, try to resume playback if the element has a source
+    if (audioElement.srcObject) {
+      console.log('[RTCSetup] Audio element has srcObject, attempting to resume playback');
+      audioElement.play()
+        .then(() => {
+          console.log('[RTCSetup] Audio playback resumed successfully');
+        })
+        .catch((error) => {
+          console.error('[RTCSetup] Error resuming audio playback:', error);
+          // If autoplay fails, the user might need to interact with the page first
+          if (error.name === 'NotAllowedError') {
+            console.warn('[RTCSetup] Audio playback requires user interaction');
+          }
+        });
+    } else {
+      console.log('[RTCSetup] Audio element has no srcObject - playback will start when stream is received');
+    }
+  } else {
+    // When disabling audio, pause playback but don't clear the srcObject
+    // so we can resume later without needing to re-establish the stream
+    if (audioElement.srcObject) {
+      audioElement.pause();
+      console.log('[RTCSetup] Audio playback paused for text mode');
+    }
+  }
+  
+  console.log(`[RTCSetup] Audio element state updated: muted=${audioElement.muted}, autoplay=${audioElement.autoplay}`);
 }
 
 /**

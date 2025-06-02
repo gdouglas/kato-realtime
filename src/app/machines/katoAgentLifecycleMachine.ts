@@ -668,14 +668,14 @@ export const agentLifecycleMachine = setup({
       }
     },
     sendSessionUpdateOnActivation: ({ context }) => {
-      const { dc, currentAgentConfig, logClientEvent, eventBus, isAudioPlaybackEnabled, pushToTalk } = context;
+      const { dc, currentAgentConfig, logClientEvent, eventBus, isAudioPlaybackEnabled, pushToTalk, micEnabled } = context;
       if (dc && dc.readyState === 'open' && currentAgentConfig) {
         const modalities = isAudioPlaybackEnabled ? ["text", "audio"] : ["text"];
         
         let turnDetectionSettings: any = null;
         // If pushToTalk is false (i.e., conversation mode), enable server-side VAD.
         // Otherwise, turn_detection remains null (PTT mode, or no mic).
-        if (pushToTalk === false) {
+        if (pushToTalk === false && micEnabled === true) {
           turnDetectionSettings = {
             type: "server_vad", 
             threshold: 0.5, 
@@ -685,22 +685,32 @@ export const agentLifecycleMachine = setup({
           };
         }
 
+        // Build session configuration object
+        const sessionConfig: any = {
+          modalities: modalities,
+          instructions: currentAgentConfig.instructions,
+          voice: currentAgentConfig.voice || "shimmer",
+          tools: currentAgentConfig.tools || [],
+          turn_detection: turnDetectionSettings,
+        };
+
+        // Only include input_audio_transcription if microphone is enabled
+        // This prevents unwanted transcription in text-only mode
+        if (micEnabled === true && isAudioPlaybackEnabled) {
+          sessionConfig.input_audio_transcription = { model: "whisper-1" };
+        }
+
         // Step 1: Send the session.update to configure the agent with new settings
         const sessionUpdatePayload = {
           type: "session.update",
-          session: {
-            modalities: modalities,
-            instructions: currentAgentConfig.instructions,
-            voice: currentAgentConfig.voice || "shimmer",
-            input_audio_transcription: { model: "whisper-1" }, 
-            tools: currentAgentConfig.tools || [],
-            turn_detection: turnDetectionSettings, // Add VAD settings here
-          }
+          session: sessionConfig
         };
+        
         try {
           dc.send(JSON.stringify(sessionUpdatePayload));
           logClientEvent(sessionUpdatePayload, "session_update_on_activation");
           console.log("[XState Actions] Sent session.update on agent activation:", sessionUpdatePayload);
+          console.log(`[XState Actions] Session configured for ${micEnabled && isAudioPlaybackEnabled ? 'SPEAK' : 'WRITE'} mode - transcription ${micEnabled && isAudioPlaybackEnabled ? 'ENABLED' : 'DISABLED'}`);
 
           // Step 2: After session update, send the conversation history if switching agents
           if (context.previousAgentName && context.previousAgentName !== currentAgentConfig.name) {
@@ -799,26 +809,16 @@ export const agentLifecycleMachine = setup({
     },
     // Action to emit TOOL_CALL_COMPLETED
     emitToolCallCompleted: ({ context, event }) => {
-      const { eventBus } = context;
-      const toolEvent = event as Extract<AgentLifecycleMachineEvent, { type: 'TOOL_EXECUTOR_SUCCESS' | 'TOOL_EXECUTOR_FAILURE' }>;
+      if (!context.eventBus) return;
       
-      if (toolEvent.type === 'TOOL_EXECUTOR_SUCCESS') {
-        console.log(`[XState Actions] Emitting TOOL_CALL_COMPLETED (Success) for ${toolEvent.functionName} (${toolEvent.callId})`);
-        eventBus.emit(KatoEvents.TOOL_CALL_COMPLETED, { 
-          callId: toolEvent.callId, 
-          functionName: toolEvent.functionName,
-          success: true, 
-          result: toolEvent.result 
-        });
-      } else if (toolEvent.type === 'TOOL_EXECUTOR_FAILURE') {
-        console.log(`[XState Actions] Emitting TOOL_CALL_COMPLETED (Failure) for ${toolEvent.functionName} (${toolEvent.callId})`);
-        eventBus.emit(KatoEvents.TOOL_CALL_COMPLETED, { 
-          callId: toolEvent.callId,
-          functionName: toolEvent.functionName,
-          success: false, 
-          error: toolEvent.error 
-        });
-      }
+      const { callId, functionName, result, error } = event as any;
+      context.eventBus.emit(KatoEvents.TOOL_CALL_COMPLETED, {
+        callId,
+        functionName,
+        success: !error,
+        result: result || null,
+        error: error || undefined
+      });
     },
     // New action to send "Hi" if intro was skipped
     sendSimulatedHiIfIntroSkipped: ({ context }) => {
@@ -925,6 +925,89 @@ export const agentLifecycleMachine = setup({
         });
       }
     },
+    updateConnectionSettings: assign(({ context, event, self }) => {
+      const settingsEvent = event as SpecificEvent<'USER_UPDATED_SETTINGS'>;
+      console.log('[XState] Processing USER_UPDATED_SETTINGS:', settingsEvent);
+      
+      // Check if this is a mode change that requires reconnection
+      const audioModeChanged = context.audioOutputEnabled !== settingsEvent.audioOutputEnabled;
+      const isConnected = context.sessionStatus === 'CONNECTED';
+      
+      // Always update the context first - this is what was missing!
+      const updatedContext = {
+        micEnabled: settingsEvent.micEnabled,
+        audioOutputEnabled: settingsEvent.audioOutputEnabled,
+        pushToTalk: settingsEvent.pushToTalk,
+        isAudioPlaybackEnabled: settingsEvent.audioOutputEnabled, // Keep in sync
+      };
+      
+      // If we're changing audio modes while connected, we need to reconnect for a clean state
+      if (audioModeChanged && isConnected && context.pc) {
+        console.log('[XState] Audio mode changed while connected - triggering clean reconnection');
+        
+        // Store the target agent name so we can reconnect to the same agent
+        const currentAgentName = context.currentAgentConfig?.name;
+        
+        // Emit event to indicate we're reconnecting for audio mode change
+        context.eventBus.emit(KatoEvents.AUDIO_PLAYBACK_ENABLED_CHANGED, settingsEvent.audioOutputEnabled);
+        
+        // Send disconnect and then reconnect with new audio mode
+        self.send({ 
+          type: 'RTC_DISCONNECTED', 
+          reason: 'audio_mode_change', 
+          manual: false, 
+          isSwitchingAgent: false 
+        });
+        
+        // Return updated context but don't continue with other updates since we're disconnecting
+        return updatedContext;
+      }
+      
+      // For non-mode-changing updates or when not connected, handle normally
+      if (context.pc && typeof settingsEvent.micEnabled === 'boolean') {
+        console.log('[XState] Updating microphone setting:', settingsEvent.micEnabled);
+        setMicrophoneEnabled(context.pc, settingsEvent.micEnabled)
+          .then(() => {
+            console.log('[XState] Microphone setting updated successfully');
+            context.eventBus.emit(KatoEvents.MICROPHONE_ACCESS_RECOVERED);
+          })
+          .catch((error) => {
+            console.error('[XState] Failed to update microphone setting:', error);
+            context.eventBus.emit(KatoEvents.MICROPHONE_ACCESS_ERROR, { error: error.message });
+          });
+      }
+      
+      // Update audio output settings for non-mode-changing cases
+      if (context.audioElement && typeof settingsEvent.audioOutputEnabled === 'boolean' && !audioModeChanged) {
+        console.log('[XState] Updating audio output setting (no mode change):', settingsEvent.audioOutputEnabled);
+        try {
+          setAudioOutputEnabled(context.audioElement, settingsEvent.audioOutputEnabled);
+          console.log('[XState] Audio output setting updated successfully');
+          context.eventBus.emit(KatoEvents.AUDIO_PLAYBACK_ENABLED_CHANGED, settingsEvent.audioOutputEnabled);
+        } catch (error) {
+          console.error('[XState] Failed to update audio output setting:', error);
+        }
+      }
+      
+      // Update audio input mode based on push-to-talk setting
+      if (context.eventBus && typeof settingsEvent.pushToTalk === 'boolean') {
+        const newMode = settingsEvent.micEnabled ? 
+          (settingsEvent.pushToTalk ? 'ptt' : 'conversation') : 
+          'no_mic';
+        console.log('[XState] Updating audio input mode to:', newMode);
+        context.eventBus.emit(KatoEvents.AUDIO_INPUT_MODE_CHANGED, { mode: newMode });
+      }
+
+      // Emit settings updated event to notify other components
+      context.eventBus.emit(KatoEvents.SETTINGS_UPDATED, {
+        mic: settingsEvent.micEnabled,
+        audioOut: settingsEvent.audioOutputEnabled,
+        ptt: settingsEvent.pushToTalk
+      });
+      
+      // Return the updated context
+      return updatedContext;
+    }),
   },
   actors: {
     fetchTokenAndConnectRTC: fromPromise(async ({ input, self }) => {
@@ -1288,28 +1371,8 @@ export const agentLifecycleMachine = setup({
     },
     USER_UPDATED_SETTINGS: {
       actions: [
-        assign(({ context, event }) => {
-          // Toggle microphone if session is active
-          if (context.pc && typeof event.micEnabled === 'boolean') {
-            setMicrophoneEnabled(context.pc, event.micEnabled);
-          }
-          // Toggle speaker if audio element is available
-          if (context.audioElement && typeof event.audioOutputEnabled === 'boolean') {
-            setAudioOutputEnabled(context.audioElement, event.audioOutputEnabled);
-          }
-          // Emit AUDIO_INPUT_MODE_CHANGED if pushToTalk changes
-          if (context.eventBus && typeof event.pushToTalk === 'boolean') {
-            context.eventBus.emit(
-              KatoEvents.AUDIO_INPUT_MODE_CHANGED,
-              event.pushToTalk ? 'ptt' : 'conversation'
-            );
-          }
-          return {
-            micEnabled: event.micEnabled,
-            audioOutputEnabled: event.audioOutputEnabled,
-            pushToTalk: event.pushToTalk,
-          };
-        })
+        'updateConnectionSettings',
+        // Removed duplicate assignment - updateConnectionSettings now handles all context updates
       ],
     },
   },
@@ -1533,6 +1596,18 @@ export const agentLifecycleMachine = setup({
           ]
         },
         RTC_DISCONNECTED: [
+          {
+            guard: ({ event }) => {
+              const rtcEvent = event as SpecificEvent<'RTC_DISCONNECTED'>;
+              return rtcEvent.reason === 'audio_mode_change';
+            },
+            target: '#katoAgentLifecycle.connecting',
+            actions: [
+              ({ context }) => console.log('[XState] Reconnecting immediately after audio mode change'),
+              'setDisconnectedStatus', 
+              'clearRtcRefs'
+            ]
+          },
           {
             guard: 'isUnexpectedRtcDisconnect',
             target: '#katoAgentLifecycle.connectionError',

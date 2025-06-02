@@ -28,7 +28,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine` (or legacy connection logic).
    * Payload: None.
    */
-  USER_REQUESTED_CONNECT: 'USER_REQUESTED_CONNECT' as const,
+  USER_REQUESTED_CONNECT: 'USER_REQUESTED_CONNECT',
 
   /**
    * User has explicitly requested to disconnect from the Kato service.
@@ -36,7 +36,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine` (or legacy connection logic).
    * Payload: {@link Payloads.UserRequestedDisconnectPayload}
    */
-  USER_REQUESTED_DISCONNECT: 'USER_REQUESTED_DISCONNECT' as const, 
+  USER_REQUESTED_DISCONNECT: 'USER_REQUESTED_DISCONNECT', 
 
   /**
    * User has sent a text message.
@@ -44,7 +44,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine` (to send to server or handle locally).
    * Payload: {@link Payloads.UserSentTextMessagePayload}
    */
-  USER_SENT_TEXT_MESSAGE: 'USER_SENT_TEXT_MESSAGE' as const, 
+  USER_SENT_TEXT_MESSAGE: 'USER_SENT_TEXT_MESSAGE', 
 
   /**
    * User has selected a new agent from a list or menu.
@@ -52,7 +52,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine` (to initiate agent switch).
    * Payload: {@link Payloads.UserSelectedAgentPayload}
    */
-  USER_SELECTED_AGENT: 'USER_SELECTED_AGENT' as const, 
+  USER_SELECTED_AGENT: 'USER_SELECTED_AGENT', 
 
   /**
    * User has toggled the audio playback setting (e.g., mute/unmute assistant speech).
@@ -60,7 +60,7 @@ export const KatoEvents = {
    * Consumed by: Audio output services, `agentLifecycleMachine` (to update context).
    * Payload: {@link Payloads.UserToggledAudioPlaybackPayload}
    */
-  USER_TOGGLED_AUDIO_PLAYBACK: 'USER_TOGGLED_AUDIO_PLAYBACK' as const,
+  USER_TOGGLED_AUDIO_PLAYBACK: 'USER_TOGGLED_AUDIO_PLAYBACK',
 
   /**
    * User has initiated a request to start speaking (e.g., pressed PTT button).
@@ -68,7 +68,7 @@ export const KatoEvents = {
    * Consumed by: Audio input services, `agentLifecycleMachine`.
    * Payload: None.
    */
-  USER_REQUESTED_TALK_START: 'USER_REQUESTED_TALK_START' as const,
+  USER_REQUESTED_TALK_START: 'USER_REQUESTED_TALK_START',
 
   /**
    * User has initiated a request to stop speaking (e.g., released PTT button).
@@ -76,7 +76,7 @@ export const KatoEvents = {
    * Consumed by: Audio input services, `agentLifecycleMachine`.
    * Payload: None.
    */
-  USER_REQUESTED_TALK_END: 'USER_REQUESTED_TALK_END' as const,
+  USER_REQUESTED_TALK_END: 'USER_REQUESTED_TALK_END',
 
   /**
    * User has requested a change in the UI mode (e.g., from avatar view to text-only view).
@@ -84,7 +84,7 @@ export const KatoEvents = {
    * Consumed by: UI layout components.
    * Payload: {@link Payloads.UserRequestedUiModeChangePayload}
    */
-  USER_REQUESTED_UI_MODE_CHANGE: 'USER_REQUESTED_UI_MODE_CHANGE' as const,
+  USER_REQUESTED_UI_MODE_CHANGE: 'USER_REQUESTED_UI_MODE_CHANGE',
 
   /**
    * User has requested a change in the audio input mode (e.g., conversation, PTT, no mic).
@@ -92,7 +92,7 @@ export const KatoEvents = {
    * Consumed by: Audio input services, `useAudioInputV2` hook, UI components.
    * Payload: {@link Payloads.UserRequestedAudioInputModeChangePayload}
    */
-  USER_REQUESTED_AUDIO_INPUT_MODE_CHANGE: 'USER_REQUESTED_AUDIO_INPUT_MODE_CHANGE' as const,
+  USER_REQUESTED_AUDIO_INPUT_MODE_CHANGE: 'USER_REQUESTED_AUDIO_INPUT_MODE_CHANGE',
 
   /**
    * User has triggered an action to create a differential diagnosis (DDX).
@@ -100,7 +100,7 @@ export const KatoEvents = {
    * Consumed by: Specific agent logic or DDX service.
    * Payload: None.
    */
-  USER_TRIGGERED_CREATE_DDX: 'USER_TRIGGERED_CREATE_DDX' as const,
+  USER_TRIGGERED_CREATE_DDX: 'USER_TRIGGERED_CREATE_DDX',
 
   /**
    * User has performed an action that should interrupt the assistant's current speech output.
@@ -108,7 +108,7 @@ export const KatoEvents = {
    * Consumed by: Audio output services, `agentLifecycleMachine`.
    * Payload: None.
    */
-  USER_INTERRUPTED_ASSISTANT_SPEECH: 'USER_INTERRUPTED_ASSISTANT_SPEECH' as const,
+  USER_INTERRUPTED_ASSISTANT_SPEECH: 'USER_INTERRUPTED_ASSISTANT_SPEECH',
 
   /**
    * User has confirmed an audio-related modal (e.g., a modal asking for microphone permission or interaction to play audio).
@@ -116,7 +116,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine` or audio services to proceed with audio actions.
    * Payload: None.
    */
-  USER_CONFIRMED_AUDIO_MODAL: 'USER_CONFIRMED_AUDIO_MODAL' as const,
+  USER_CONFIRMED_AUDIO_MODAL: 'USER_CONFIRMED_AUDIO_MODAL',
 
   /**
    * User has clicked the button to generate a Differential Diagnosis.
@@ -124,7 +124,7 @@ export const KatoEvents = {
    * Consumed by: Page logic (e.g., speak/page.tsx or write/page.tsx) to handle navigation/disconnection.
    * Payload: None
    */
-  DDX_CREATE_CLICKED: 'DDX_CREATE_CLICKED' as const,
+  DDX_CREATE_CLICKED: 'DDX_CREATE_CLICKED',
 
   /**
    * User has clicked the button to navigate to the 'write' (notes) page.
@@ -132,15 +132,7 @@ export const KatoEvents = {
    * Consumed by: Page logic (e.g., speak/page.tsx) to handle navigation/disconnection.
    * Payload: None
    */
-  NAVIGATE_TO_WRITE_CLICKED: 'NAVIGATE_TO_WRITE_CLICKED' as const,
-
-  /**
-   * User has updated one or more settings (mic, audio output, PTT).
-   * Emitted by: UI components (e.g., Settings controls in BottomBar).
-   * Consumed by: Page logic (e.g., speak/page.tsx) to send to XState machine.
-   * Payload: {@link Payloads.SettingsUpdatedPayload} // Ensure this payload is defined
-   */
-  SETTINGS_UPDATED: 'SETTINGS_UPDATED' as const,
+  NAVIGATE_TO_WRITE_CLICKED: 'NAVIGATE_TO_WRITE_CLICKED',
 
   // --- Application/System Events --- (Events originating from within the client application logic)
 
@@ -150,7 +142,7 @@ export const KatoEvents = {
    * Consumed by: UI components for displaying error details, error reporting services.
    * Payload: {@link Payloads.ServerSessionErrorPayload} // Assuming a new payload will be defined
    */
-  SERVER_SESSION_ERROR: 'SERVER_SESSION_ERROR' as const,
+  SERVER_SESSION_ERROR: 'SERVER_SESSION_ERROR',
 
   /**
    * Indicates that the session status is about to change. Allows components to prepare for a new status.
@@ -158,7 +150,7 @@ export const KatoEvents = {
    * Consumed by: UI components for displaying intermediate states.
    * Payload: {@link Payloads.SessionStatusWillChangePayload}
    */
-  SESSION_STATUS_WILL_CHANGE: 'SESSION_STATUS_WILL_CHANGE' as const,
+  SESSION_STATUS_WILL_CHANGE: 'SESSION_STATUS_WILL_CHANGE',
 
   /**
    * Indicates that the session status has changed (e.g., CONNECTED, DISCONNECTED).
@@ -166,7 +158,7 @@ export const KatoEvents = {
    * Consumed by: UI components, other services reacting to connection state.
    * Payload: {@link Payloads.SessionStatusChangedPayload}
    */
-  SESSION_STATUS_CHANGED: 'SESSION_STATUS_CHANGED' as const,
+  SESSION_STATUS_CHANGED: 'SESSION_STATUS_CHANGED',
 
   /**
    * Indicates a change in the status of the WebRTC data channel.
@@ -174,7 +166,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine`, UI components for diagnostics.
    * Payload: {@link Payloads.DataChannelStatusChangedPayload}
    */
-  DATA_CHANNEL_STATUS_CHANGED: 'DATA_CHANNEL_STATUS_CHANGED' as const,
+  DATA_CHANNEL_STATUS_CHANGED: 'DATA_CHANNEL_STATUS_CHANGED',
 
   /**
    * A connection attempt to the Kato service has started.
@@ -182,7 +174,7 @@ export const KatoEvents = {
    * Consumed by: UI components (e.g., to show a loading indicator).
    * Payload: None.
    */
-  CONNECTION_ATTEMPT_STARTED: 'CONNECTION_ATTEMPT_STARTED' as const,
+  CONNECTION_ATTEMPT_STARTED: 'CONNECTION_ATTEMPT_STARTED',
 
   /**
    * Connection to the Kato service has been successfully established.
@@ -190,7 +182,7 @@ export const KatoEvents = {
    * Consumed by: UI components, services that require an active connection.
    * Payload: None.
    */
-  CONNECTION_ESTABLISHED: 'CONNECTION_ESTABLISHED' as const, 
+  CONNECTION_ESTABLISHED: 'CONNECTION_ESTABLISHED', 
 
   /**
    * Connection to the Kato service has failed.
@@ -198,7 +190,7 @@ export const KatoEvents = {
    * Consumed by: UI components (to show error messages), error reporting services.
    * Payload: {@link Payloads.ConnectionFailedPayload}
    */
-  CONNECTION_FAILED: 'CONNECTION_FAILED' as const,
+  CONNECTION_FAILED: 'CONNECTION_FAILED',
 
   /**
    * Disconnection process has completed (e.g., after user request or agent switch).
@@ -206,7 +198,7 @@ export const KatoEvents = {
    * Consumed by: UI components, services cleaning up resources.
    * Payload: None.
    */
-  DISCONNECT_COMPLETED: 'DISCONNECT_COMPLETED' as const,
+  DISCONNECT_COMPLETED: 'DISCONNECT_COMPLETED',
 
   /**
    * The state of the agent's introductory audio has changed (playing, stopped, error).
@@ -214,7 +206,7 @@ export const KatoEvents = {
    * Consumed by: UI components (e.g., to show playback status), `agentLifecycleMachine`.
    * Payload: {@link Payloads.IntroAudioStateChangedPayload}
    */
-  INTRO_AUDIO_STATE_CHANGED: 'INTRO_AUDIO_STATE_CHANGED' as const,
+  INTRO_AUDIO_STATE_CHANGED: 'INTRO_AUDIO_STATE_CHANGED',
 
   /**
    * The visibility of an audio-related modal (e.g., microphone permission, user interaction for audio) has changed.
@@ -222,7 +214,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine` or other UI components.
    * Payload: {@link Payloads.AudioModalVisibilityChangedPayload}
    */
-  AUDIO_MODAL_VISIBILITY_CHANGED: 'AUDIO_MODAL_VISIBILITY_CHANGED' as const,
+  AUDIO_MODAL_VISIBILITY_CHANGED: 'AUDIO_MODAL_VISIBILITY_CHANGED',
 
   /**
    * The active speaker turn has changed (e.g., user, specific agent role, or none).
@@ -230,7 +222,7 @@ export const KatoEvents = {
    * Consumed by: UI components (e.g., to highlight active speaker avatar).
    * Payload: {@link Payloads.ActiveSpeakerTurnChangedPayload}
    */
-  ACTIVE_SPEAKER_TURN_CHANGED: 'ACTIVE_SPEAKER_TURN_CHANGED' as const,
+  ACTIVE_SPEAKER_TURN_CHANGED: 'ACTIVE_SPEAKER_TURN_CHANGED',
 
   /**
    * Agent configurations have been loaded into the application.
@@ -238,7 +230,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine`, UI components displaying agent lists.
    * Payload: {@link Payloads.AgentConfigurationLoadedPayload}
    */
-  AGENT_CONFIGURATION_LOADED: 'AGENT_CONFIGURATION_LOADED' as const,
+  AGENT_CONFIGURATION_LOADED: 'AGENT_CONFIGURATION_LOADED',
 
   /**
    * The current active agent has changed.
@@ -248,7 +240,7 @@ export const KatoEvents = {
    * Consumed by: UI components, services that need to adapt to the current agent.
    * Payload: {@link Payloads.CurrentAgentChangedPayload}
    */
-  CURRENT_AGENT_CHANGED: 'CURRENT_AGENT_CHANGED' as const,
+  CURRENT_AGENT_CHANGED: 'CURRENT_AGENT_CHANGED',
 
   /**
    * The UI mode (e.g., avatar, text-only) has changed.
@@ -256,7 +248,7 @@ export const KatoEvents = {
    * Consumed by: Various UI components adapting to the mode.
    * Payload: {@link Payloads.UiModeChangedPayload}
    */
-  UI_MODE_CHANGED: 'UI_MODE_CHANGED' as const,
+  UI_MODE_CHANGED: 'UI_MODE_CHANGED',
 
   /**
    * The status of Push-to-Talk (PTT) has changed (active/inactive).
@@ -264,7 +256,7 @@ export const KatoEvents = {
    * Consumed by: UI components (e.g., to show PTT button state).
    * Payload: {@link Payloads.PttActiveChangedPayload}
    */
-  PTT_ACTIVE_CHANGED: 'PTT_ACTIVE_CHANGED' as const,
+  PTT_ACTIVE_CHANGED: 'PTT_ACTIVE_CHANGED',
 
   /**
    * Indicates whether the user is currently speaking while PTT is active.
@@ -272,7 +264,7 @@ export const KatoEvents = {
    * Consumed by: UI components (e.g., to provide visual feedback for speaking).
    * Payload: {@link Payloads.PttUserSpeakingChangedPayload}
    */
-  PTT_USER_SPEAKING_CHANGED: 'PTT_USER_SPEAKING_CHANGED' as const,
+  PTT_USER_SPEAKING_CHANGED: 'PTT_USER_SPEAKING_CHANGED',
 
   /**
    * The master audio playback enabled/disabled status has changed.
@@ -280,7 +272,7 @@ export const KatoEvents = {
    * Consumed by: Audio output services.
    * Payload: {@link Payloads.AudioPlaybackEnabledChangedPayload}
    */
-  AUDIO_PLAYBACK_ENABLED_CHANGED: 'AUDIO_PLAYBACK_ENABLED_CHANGED' as const,
+  AUDIO_PLAYBACK_ENABLED_CHANGED: 'AUDIO_PLAYBACK_ENABLED_CHANGED',
 
   /**
    * The status of the output audio buffer has changed (e.g., actively playing or idle).
@@ -288,7 +280,7 @@ export const KatoEvents = {
    * Consumed by: UI components (e.g., to show if assistant is speaking), `agentLifecycleMachine`.
    * Payload: {@link Payloads.OutputAudioBufferStatusChangedPayload}
    */
-  OUTPUT_AUDIO_BUFFER_STATUS_CHANGED: 'OUTPUT_AUDIO_BUFFER_STATUS_CHANGED' as const,
+  OUTPUT_AUDIO_BUFFER_STATUS_CHANGED: 'OUTPUT_AUDIO_BUFFER_STATUS_CHANGED',
 
   /**
    * The audio input mode has changed.
@@ -296,7 +288,7 @@ export const KatoEvents = {
    * Consumed by: UI components, audio input services.
    * Payload: {@link Payloads.AudioInputModeChangedPayload}
    */
-  AUDIO_INPUT_MODE_CHANGED: 'AUDIO_INPUT_MODE_CHANGED' as const,
+  AUDIO_INPUT_MODE_CHANGED: 'AUDIO_INPUT_MODE_CHANGED',
 
   /**
    * A request to show the microphone access denied modal has been made.
@@ -304,7 +296,7 @@ export const KatoEvents = {
    * Consumed by: UI component responsible for displaying the modal.
    * Payload: None.
    */
-  SHOW_MIC_DENIED_MODAL_REQUESTED: 'SHOW_MIC_DENIED_MODAL_REQUESTED' as const,
+  SHOW_MIC_DENIED_MODAL_REQUESTED: 'SHOW_MIC_DENIED_MODAL_REQUESTED',
 
   /**
    * An error occurred while trying to access the microphone.
@@ -312,7 +304,7 @@ export const KatoEvents = {
    * Consumed by: UI components (to display error messages/state).
    * Payload: {@link Payloads.MicrophoneAccessErrorPayload}
    */
-  MICROPHONE_ACCESS_ERROR: 'MICROPHONE_ACCESS_ERROR' as const,
+  MICROPHONE_ACCESS_ERROR: 'MICROPHONE_ACCESS_ERROR',
 
   /**
    * Microphone access has been successfully recovered after a previous error.
@@ -320,7 +312,7 @@ export const KatoEvents = {
    * Consumed by: UI components (to clear error messages/state).
    * Payload: None.
    */
-  MICROPHONE_ACCESS_RECOVERED: 'MICROPHONE_ACCESS_RECOVERED' as const,
+  MICROPHONE_ACCESS_RECOVERED: 'MICROPHONE_ACCESS_RECOVERED',
 
   // --- Server-Driven Events --- (Events originating from messages received from the Kato server)
 
@@ -331,7 +323,7 @@ export const KatoEvents = {
    * Consumed by: Central server message processing logic (e.g., in `App.tsx` or `agentLifecycleMachine`).
    * Payload: {@link Payloads.ServerMessageReceivedPayload}
    */
-  SERVER_MESSAGE_RECEIVED: 'SERVER_MESSAGE_RECEIVED' as const,
+  SERVER_MESSAGE_RECEIVED: 'SERVER_MESSAGE_RECEIVED',
 
   /**
    * The server has sent an update regarding the session status.
@@ -339,7 +331,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine`, UI components.
    * Payload: {@link Payloads.ServerSessionStatusUpdatePayload}
    */
-  SERVER_SESSION_STATUS_UPDATE: 'SERVER_SESSION_STATUS_UPDATE' as const,
+  SERVER_SESSION_STATUS_UPDATE: 'SERVER_SESSION_STATUS_UPDATE',
 
   /**
    * The server has sent a new transcript item or an update to an existing one.
@@ -347,7 +339,7 @@ export const KatoEvents = {
    * Consumed by: Transcript management service/context.
    * Payload: {@link Payloads.ServerTranscriptItemPayload}
    */
-  SERVER_TRANSCRIPT_ITEM: 'SERVER_TRANSCRIPT_ITEM' as const,
+  SERVER_TRANSCRIPT_ITEM: 'SERVER_TRANSCRIPT_ITEM',
 
   /**
    * The server has indicated that audio output (assistant speech) has started.
@@ -355,7 +347,7 @@ export const KatoEvents = {
    * Consumed by: Audio output services, UI components.
    * Payload: None.
    */
-  SERVER_OUTPUT_AUDIO_STARTED: 'SERVER_OUTPUT_AUDIO_STARTED' as const,
+  SERVER_OUTPUT_AUDIO_STARTED: 'SERVER_OUTPUT_AUDIO_STARTED',
 
   /**
    * The server has indicated that audio output (assistant speech) has ended.
@@ -363,7 +355,7 @@ export const KatoEvents = {
    * Consumed by: Audio output services, UI components.
    * Payload: None.
    */
-  SERVER_OUTPUT_AUDIO_ENDED: 'SERVER_OUTPUT_AUDIO_ENDED' as const,
+  SERVER_OUTPUT_AUDIO_ENDED: 'SERVER_OUTPUT_AUDIO_ENDED',
 
   /**
    * The server has indicated that the current agent response has been cancelled.
@@ -371,7 +363,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine`, UI components, audio output service (to stop playback).
    * Payload: None.
    */
-  SERVER_AGENT_RESPONSE_CANCELLED: 'SERVER_AGENT_RESPONSE_CANCELLED' as const,
+  SERVER_AGENT_RESPONSE_CANCELLED: 'SERVER_AGENT_RESPONSE_CANCELLED',
 
   /**
    * The server has acknowledged an update to the session (e.g., new agent instructions).
@@ -379,7 +371,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine` or logic that sent the session update.
    * Payload: None.
    */
-  SERVER_SESSION_UPDATED_ACK: 'SERVER_SESSION_UPDATED_ACK' as const,
+  SERVER_SESSION_UPDATED_ACK: 'SERVER_SESSION_UPDATED_ACK',
 
   /**
    * The server has confirmed the creation of a new session.
@@ -387,7 +379,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine`, Transcript context, UI.
    * Payload: {@link Payloads.ServerSessionCreatedPayload}
    */
-  SERVER_SESSION_CREATED: 'SERVER_SESSION_CREATED' as const,
+  SERVER_SESSION_CREATED: 'SERVER_SESSION_CREATED',
 
   /**
    * The server has indicated a new transcript item has been created.
@@ -395,7 +387,7 @@ export const KatoEvents = {
    * Consumed by: Transcript context/service.
    * Payload: {@link Payloads.ServerTranscriptItemCreatedPayload}
    */
-  SERVER_TRANSCRIPT_ITEM_CREATED: 'SERVER_TRANSCRIPT_ITEM_CREATED' as const,
+  SERVER_TRANSCRIPT_ITEM_CREATED: 'SERVER_TRANSCRIPT_ITEM_CREATED',
 
   /**
    * The server has indicated that a user's transcript (speech-to-text) is complete.
@@ -403,7 +395,7 @@ export const KatoEvents = {
    * Consumed by: Transcript context/service.
    * Payload: {@link Payloads.ServerUserTranscriptCompletedPayload}
    */
-  SERVER_USER_TRANSCRIPT_COMPLETED: 'SERVER_USER_TRANSCRIPT_COMPLETED' as const,
+  SERVER_USER_TRANSCRIPT_COMPLETED: 'SERVER_USER_TRANSCRIPT_COMPLETED',
 
   /**
    * A delta (partial update) for a user's transcript item has been received from the server.
@@ -412,7 +404,7 @@ export const KatoEvents = {
    * Consumed by: `TranscriptContext` (to update the user's message in real-time).
    * Payload: {@link Payloads.ServerUserTranscriptDeltaPayload}
    */
-  SERVER_USER_TRANSCRIPT_DELTA: 'SERVER_USER_TRANSCRIPT_DELTA' as const,
+  SERVER_USER_TRANSCRIPT_DELTA: 'SERVER_USER_TRANSCRIPT_DELTA',
 
   /**
    * The server is streaming parts (deltas) of an assistant's message.
@@ -420,7 +412,7 @@ export const KatoEvents = {
    * Consumed by: Transcript context/service (to update an in-progress assistant message).
    * Payload: {@link Payloads.ServerAssistantDeltaReceivedPayload}
    */
-  SERVER_ASSISTANT_DELTA_RECEIVED: 'SERVER_ASSISTANT_DELTA_RECEIVED' as const,
+  SERVER_ASSISTANT_DELTA_RECEIVED: 'SERVER_ASSISTANT_DELTA_RECEIVED',
 
   /**
    * The server has indicated that an assistant's message is complete.
@@ -428,7 +420,7 @@ export const KatoEvents = {
    * Consumed by: Transcript context/service.
    * Payload: {@link Payloads.ServerAssistantMessageCompletedPayload}
    */
-  SERVER_ASSISTANT_MESSAGE_COMPLETED: 'SERVER_ASSISTANT_MESSAGE_COMPLETED' as const,
+  SERVER_ASSISTANT_MESSAGE_COMPLETED: 'SERVER_ASSISTANT_MESSAGE_COMPLETED',
 
   /**
    * The server is requesting the client to execute a function call (tool use).
@@ -436,7 +428,7 @@ export const KatoEvents = {
    * Consumed by: Tool execution logic / `agentLifecycleMachine`.
    * Payload: {@link Payloads.ServerFunctionCallRequestedPayload}
    */
-  SERVER_FUNCTION_CALL_REQUESTED: 'SERVER_FUNCTION_CALL_REQUESTED' as const,
+  SERVER_FUNCTION_CALL_REQUESTED: 'SERVER_FUNCTION_CALL_REQUESTED',
 
   /**
    * The server has sent an update to the status of a transcript item (e.g., processing, failed).
@@ -444,7 +436,7 @@ export const KatoEvents = {
    * Consumed by: Transcript context/service.
    * Payload: {@link Payloads.ServerTranscriptItemStatusUpdatePayload}
    */
-  SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE: 'SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE' as const,
+  SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE: 'SERVER_TRANSCRIPT_ITEM_STATUS_UPDATE',
 
   // --- Specific VAD and Response Lifecycle Events --- (Often server-driven, related to speech and agent responses)
 
@@ -454,7 +446,7 @@ export const KatoEvents = {
    * Consumed by: UI components (e.g., to show user speaking indicator), `agentLifecycleMachine`.
    * Payload: None.
    */
-  USER_SPEECH_STARTED: 'USER_SPEECH_STARTED' as const,
+  USER_SPEECH_STARTED: 'USER_SPEECH_STARTED',
 
   /**
    * Server has detected that the user stopped speaking (Voice Activity Detection).
@@ -462,7 +454,7 @@ export const KatoEvents = {
    * Consumed by: UI components, `agentLifecycleMachine` (e.g., to finalize user input).
    * Payload: None.
    */
-  USER_SPEECH_STOPPED: 'USER_SPEECH_STOPPED' as const,
+  USER_SPEECH_STOPPED: 'USER_SPEECH_STOPPED',
 
   /**
    * Server has indicated that the agent's current response turn is complete.
@@ -470,7 +462,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine`.
    * Payload: None.
    */
-  AGENT_RESPONSE_COMPLETED: 'AGENT_RESPONSE_COMPLETED' as const,
+  AGENT_RESPONSE_COMPLETED: 'AGENT_RESPONSE_COMPLETED',
 
   // --- Client-Side Events --- (For internal client communication or preparing messages for the server)
 
@@ -480,7 +472,7 @@ export const KatoEvents = {
    * Consumed by: Central message sending service (e.g., within `KatoRTCContext` or `agentLifecycleMachine`).
    * Payload: {@link Payloads.SendMessageToServerPayload}
    */
-  SEND_MESSAGE_TO_SERVER: 'SEND_MESSAGE_TO_SERVER' as const,
+  SEND_MESSAGE_TO_SERVER: 'SEND_MESSAGE_TO_SERVER',
 
   /**
    * A request to update the session on the server (e.g., with new agent instructions, tools).
@@ -488,7 +480,7 @@ export const KatoEvents = {
    * Consumed by: Logic responsible for sending `session.update` messages to the server.
    * Payload: {@link Payloads.SessionUpdateRequestPayload}
    */
-  SESSION_UPDATE_REQUESTED: 'SESSION_UPDATE_REQUESTED' as const,
+  SESSION_UPDATE_REQUESTED: 'SESSION_UPDATE_REQUESTED',
 
   // --- Agent Switching Lifecycle Events ---
 
@@ -498,7 +490,7 @@ export const KatoEvents = {
    * Consumed by: UI components (to show switching state), other services that need to react to agent changes.
    * Payload: {@link Payloads.AgentSwitchStartedPayload}
    */
-  AGENT_SWITCH_STARTED: 'AGENT_SWITCH_STARTED' as const,
+  AGENT_SWITCH_STARTED: 'AGENT_SWITCH_STARTED',
 
   /**
    * The agent switching process has completed successfully.
@@ -506,7 +498,7 @@ export const KatoEvents = {
    * Consumed by: UI components, other services.
    * Payload: {@link Payloads.AgentSwitchCompletedPayload}
    */
-  AGENT_SWITCH_COMPLETED: 'AGENT_SWITCH_COMPLETED' as const,
+  AGENT_SWITCH_COMPLETED: 'AGENT_SWITCH_COMPLETED',
 
   /**
    * The agent switching process has failed.
@@ -514,7 +506,7 @@ export const KatoEvents = {
    * Consumed by: UI components (to show error), error reporting.
    * Payload: {@link Payloads.AgentSwitchFailedPayload}
    */
-  AGENT_SWITCH_FAILED: 'AGENT_SWITCH_FAILED' as const,
+  AGENT_SWITCH_FAILED: 'AGENT_SWITCH_FAILED',
 
   /**
    * A request to play the introductory audio for an agent.
@@ -522,7 +514,7 @@ export const KatoEvents = {
    * Consumed by: Agent intro audio playback service.
    * Payload: {@link Payloads.PlayAgentIntroRequestedPayload}
    */
-  PLAY_AGENT_INTRO_REQUESTED: 'PLAY_AGENT_INTRO_REQUESTED' as const,
+  PLAY_AGENT_INTRO_REQUESTED: 'PLAY_AGENT_INTRO_REQUESTED',
 
   /**
    * The playback of an agent's introductory audio has completed.
@@ -530,7 +522,7 @@ export const KatoEvents = {
    * Consumed by: `agentLifecycleMachine`.
    * Payload: {@link Payloads.AgentIntroPlaybackCompletedPayload}
    */
-  AGENT_INTRO_PLAYBACK_COMPLETED: 'AGENT_INTRO_PLAYBACK_COMPLETED' as const,
+  AGENT_INTRO_PLAYBACK_COMPLETED: 'AGENT_INTRO_PLAYBACK_COMPLETED',
 
   // --- Client-side Audio Output Control Events ---
 
@@ -541,7 +533,7 @@ export const KatoEvents = {
    * Consumed by: Audio output service.
    * Payload: None.
    */
-  OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED: 'OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED' as const,
+  OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED: 'OUTPUT_AUDIO_BUFFER_CLEAR_REQUESTED',
 
   /**
    * A request to update the transcript with agent-specific conversation context.
@@ -549,7 +541,7 @@ export const KatoEvents = {
    * Consumed by: TranscriptContext to update the displayed messages.
    * Payload: { agentName: string }
    */
-  UPDATE_TRANSCRIPT_WITH_AGENT_CONTEXT: 'UPDATE_TRANSCRIPT_WITH_AGENT_CONTEXT' as const,
+  UPDATE_TRANSCRIPT_WITH_AGENT_CONTEXT: 'UPDATE_TRANSCRIPT_WITH_AGENT_CONTEXT',
 
   // --- Tool Call Lifecycle Events (for UI and other listeners) ---
 
@@ -559,7 +551,7 @@ export const KatoEvents = {
    * Consumed by: UI components (to show tool activity indicator).
    * Payload: {@link Payloads.ToolCallStartedPayload} (e.g., { callId: string, functionName: string, argsString: string })
    */
-  TOOL_CALL_STARTED: "TOOL_CALL_STARTED" as const,
+  TOOL_CALL_STARTED: "TOOL_CALL_STARTED",
 
   /**
    * A tool call has completed (either successfully or with an error).
@@ -567,9 +559,17 @@ export const KatoEvents = {
    * Consumed by: UI components (to hide activity indicator, display results/errors).
    * Payload: {@link Payloads.ToolCallCompletedPayload}
    */
-  TOOL_CALL_COMPLETED: "TOOL_CALL_COMPLETED" as const,
+  TOOL_CALL_COMPLETED: "TOOL_CALL_COMPLETED",
 
   USER_REQUESTED_OPEN_SETTINGS_MODAL: 'USER_REQUESTED_OPEN_SETTINGS_MODAL',
   USER_REQUESTED_CLOSE_SETTINGS_MODAL: 'USER_REQUESTED_CLOSE_SETTINGS_MODAL',
   USER_UPDATED_SETTINGS: 'USER_UPDATED_SETTINGS',
-}; 
+  
+  /**
+   * Settings have been updated by the system (in response to user changes).
+   * Emitted by: `agentLifecycleMachine` after processing USER_UPDATED_SETTINGS.
+   * Consumed by: UI components that need to reflect the updated settings state.
+   * Payload: {@link Payloads.SettingsUpdatedPayload}
+   */
+  SETTINGS_UPDATED: 'SETTINGS_UPDATED',
+} as const; 

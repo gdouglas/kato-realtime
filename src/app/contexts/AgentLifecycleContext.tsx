@@ -85,22 +85,9 @@ export const AgentLifecycleProvider: React.FC<AgentLifecycleProviderProps> = ({
     input: machineInput,
   });
 
-  // Effect to update audio playback enabled status when it changes from props
-  useEffect(() => {
-    // Don't send during initial setup to avoid duplicate event
-    if (state.context.isAudioPlaybackEnabled !== isAudioPlaybackEnabled) {
-      console.log(`[AgentLifecycleProvider] Audio playback setting changed to: ${isAudioPlaybackEnabled}`);
-      
-      // Send event to XState machine to update its context
-      // The state machine will handle reconnection logic if needed
-      send({ 
-        type: 'SETTING_AUDIO_OUTPUT_ENABLED', 
-        value: isAudioPlaybackEnabled 
-      });
-      
-      // Let the state machine handle reconnection if needed
-    }
-  }, [isAudioPlaybackEnabled, send, state.context]);
+  // NOTE: Automatic audio playback sync removed to prevent conflicts with PageBasedAudioController
+  // The PageBasedAudioController now handles all page-based audio mode changes directly
+  // This prevents duplicate and conflicting events that were causing connection issues
 
   // Derived state for easier consumption by components
   const currentAgentConfig = state.context.currentAgentConfig;

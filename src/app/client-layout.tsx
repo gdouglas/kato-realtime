@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { AgentLifecycleProvider } from '@/app/contexts/AgentLifecycleContext';
 import { EventBusProvider } from '@/app/contexts/EventBusContext';
@@ -12,31 +12,75 @@ import { allAgentSets, defaultAgentSetKey } from "@/app/agentConfigs";
 import Image from "next/image";
 import SettingsButton from "@/app/components/Settings/SettingsButton";
 import SettingsModal from "@/app/components/Settings/SettingsModal";
+import AudioStatusIndicators from "@/app/components/AudioStatusIndicators";
+import { useAgentLifecycle } from '@/app/contexts/AgentLifecycleContext';
 
 interface ClientLayoutProps {
   children: React.ReactNode;
 }
 
+// Component to handle page-based audio settings
+const PageBasedAudioController: React.FC = () => {
+  const pathname = usePathname();
+  const agentLifecycle = useAgentLifecycle();
+  
+  // Simple state to track if we've handled this page
+  const [lastHandledPath, setLastHandledPath] = useState<string>('');
+  const [isHandling, setIsHandling] = useState(false);
+
+  useEffect(() => {
+    // Only handle if path changed and we're not already handling
+    if (pathname !== lastHandledPath && !isHandling) {
+      const isWritePage = pathname === '/cases/kato/write';
+      
+      if (isWritePage) {
+        // Disable audio for write page
+        console.log('[PageBasedAudioController] Switching to WRITE mode - disabling audio');
+        setIsHandling(true);
+        setLastHandledPath(pathname);
+        
+        setTimeout(() => {
+          agentLifecycle.send({
+            type: 'USER_UPDATED_SETTINGS',
+            micEnabled: false,
+            audioOutputEnabled: false,
+            pushToTalk: false
+          });
+          setIsHandling(false);
+        }, 100);
+      } else if (lastHandledPath === '/cases/kato/write') {
+        // Re-enable audio when leaving write page
+        console.log('[PageBasedAudioController] Leaving WRITE mode - enabling audio');
+        setIsHandling(true);
+        setLastHandledPath(pathname);
+        
+        setTimeout(() => {
+          agentLifecycle.send({
+            type: 'USER_UPDATED_SETTINGS',
+            micEnabled: true,
+            audioOutputEnabled: true,
+            pushToTalk: false
+          });
+          setIsHandling(false);
+        }, 100);
+      } else {
+        // Just update the path tracking for other pages
+        setLastHandledPath(pathname);
+      }
+    }
+  }, [pathname, lastHandledPath, isHandling, agentLifecycle]);
+
+  return null;
+};
+
 export default function ClientLayout({ children }: ClientLayoutProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isClient, setIsClient] = useState(false);
   const pathname = usePathname();
-  const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
   }, []);
-
-  // Set audio playback mode based on the current pathname
-  useEffect(() => {
-    const shouldEnableAudio = pathname !== '/cases/kato/write';
-    
-    // Only update if there's an actual change to avoid unnecessary reconnections
-    if (isAudioPlaybackEnabled !== shouldEnableAudio) {
-      console.log(`[ClientLayout] Setting audio mode to ${shouldEnableAudio ? 'ENABLED' : 'DISABLED'} for path: ${pathname}`);
-      setIsAudioPlaybackEnabled(shouldEnableAudio);
-    }
-  }, [pathname, isAudioPlaybackEnabled]);
 
   const agentConfigsToUse = allAgentSets[defaultAgentSetKey];
   const urlCodec = typeof window !== 'undefined' ? (new URLSearchParams(window.location.search).get('codec') || 'opus') : 'opus';
@@ -57,10 +101,13 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
               agentConfigs={agentConfigsToUse}
               urlCodec={urlCodec}
               audioElement={audioRef.current}
-              isAudioPlaybackEnabled={isAudioPlaybackEnabled}
+              isAudioPlaybackEnabled={true} // Default to true, let PageBasedAudioController manage changes
             >
               <KatoRTCProvider>
                 <AgentProvider>
+                  {/* Page-based audio controller */}
+                  <PageBasedAudioController />
+                  
                   {/* Consistent Header */}
                   <header className="p-2 border-b flex justify-between items-center bg-white dark:bg-gray-900 shadow-sm">
                     <div className="flex items-center">
@@ -73,7 +120,10 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
                       />
                       <span className="text-md font-semibold text-gray-800 dark:text-white ml-2">Mr Kato - Realtime Patient Simulator</span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-4">
+                      {/* Audio Status Indicators */}
+                      <AudioStatusIndicators />
+                      {/* Settings Button */}
                       <SettingsButton />
                     </div>
                   </header>
